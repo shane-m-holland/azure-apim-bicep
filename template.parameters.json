@@ -2,9 +2,6 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "subscriptionId": {
-      "value": "00000000-0000-0000-0000-000000000000"
-    },
     "apimName": {
       "value": "my-apim-instance"
     },
@@ -23,8 +20,20 @@
     "publisherName": {
       "value": "My Company"
     },
-    "vnetResourceId": {
-      "value": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet"
+    "nsgName": {
+      "value": "my-apim-instance-nsg"
+    },
+    "vnetName": {
+      "value": "my-apim-instance-vnet"
+    },
+    "vnetCidr": {
+      "value": "10.0.0.0/16"
+    },
+    "subnetName": {
+      "value": "default"
+    },
+    "subnetCidr": {
+      "value": "10.0.0.0/24"
     }
   }
 }

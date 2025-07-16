@@ -5,6 +5,7 @@ param skuCapacity int
 param publisherEmail string
 param publisherName string
 param vnetResourceId string
+param subnetName string
 
 resource apim 'Microsoft.ApiManagement/service@2024-06-01-preview' = {
   name: apimName
@@ -20,14 +21,14 @@ resource apim 'Microsoft.ApiManagement/service@2024-06-01-preview' = {
     hostnameConfigurations: [
       {
         type: 'Proxy'
-        hostName: '\${apimName}.azure-api.net'
+        hostName: '${apimName}.azure-api.net'
         negotiateClientCertificate: false
         defaultSslBinding: true
         certificateSource: 'BuiltIn'
       }
     ]
     virtualNetworkConfiguration: {
-      subnetResourceId: '\${vnetResourceId}/subnets/default'
+      subnetResourceId: '${vnetResourceId}/subnets/${subnetName}'
     }
     customProperties: {
       'Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Protocols.Tls10': 'False'
