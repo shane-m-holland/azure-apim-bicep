@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "subscriptionId": {
+      "value": "00000000-0000-0000-0000-000000000000"
+    },
+    "apimName": {
+      "value": "my-apim-instance"
+    },
+    "location": {
+      "value": "East US"
+    },
+    "skuName": {
+      "value": "Developer"
+    },
+    "skuCapacity": {
+      "value": 1
+    },
+    "publisherEmail": {
+      "value": "admin@example.com"
+    },
+    "publisherName": {
+      "value": "My Company"
+    },
+    "vnetResourceId": {
+      "value": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet"
+    }
+  }
+}

@@ -1,0 +1,46 @@
+# Bicep build artifacts
+*.json
+
+# Azure deployments
+*.azcli
+*.log
+
+# VS Code
+.vscode/
+.history/
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# MacOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Node (if used for CI tooling or dev dependencies)
+node_modules/
+npm-debug.log
+yarn-error.log
+.env
+
+# Python virtualenv (if scripts or tooling used)
+venv/
+__pycache__/
+*.py[cod]
+
+# Terraform (if used alongside Bicep for other infra)
+.terraform/
+*.tfstate
+*.tfstate.backup
+
+# Misc
+*.bak
+*.tmp
+*.swp
