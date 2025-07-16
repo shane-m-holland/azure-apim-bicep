@@ -34,6 +34,12 @@
     },
     "subnetCidr": {
       "value": "10.0.0.0/24"
+    },
+    "selfHostedGatewayEnabled": {
+      "value": false
+    },
+    "selfHostedGatewayName" : {
+      "value": "on-prem"
     }
   }
 }
