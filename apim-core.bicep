@@ -53,20 +53,6 @@ param selfHostedGatewayEnabled bool = false
 @description('Name of the self-hosted gateway')
 param selfHostedGatewayName string = 'default'
 
-// -------------------------------------------
-// 📦 API & Product Config
-// -------------------------------------------
-
-@description('List of product IDs to assign APIs to')
-param productIds array = [
-  'starter'
-  'unlimited'
-]
-
-@description('List of gateway names to assign APIs to')
-param gatewayNames array = [
-  'managed'
-]
 
 // -------------------------------------------
 // 🧱 Deploy Network Security Group
@@ -97,7 +83,7 @@ module vnet 'network/vnet.bicep' = {
 // -------------------------------------------
 // 🧱 Deploy APIM Instance
 // -------------------------------------------
-module apimService 'apimService.bicep' = {
+module apimService './apim/apim-service.bicep' = {
   name: 'deploy-apim-service'
   params: {
     apimName: apimName
@@ -135,18 +121,4 @@ module gateway 'gateways/gateway.bicep' = if (selfHostedGatewayEnabled) {
   }
 }
 
-// -------------------------------------------
-// 🧱 Deploy Restaurants API
-// -------------------------------------------
-module restaurantsApi 'apis/restaurants-api.bicep' = {
-  name: 'deploy-restaurants-api'
-  dependsOn: [
-    apimService
-    products
-  ]
-  params: {
-    apimName: apimName
-    productIds: productIds
-    gatewayNames: gatewayNames
-  }
-}
+

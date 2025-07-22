@@ -19,9 +19,11 @@ This project deploys a modular and configurable Azure API Management (APIM) envi
 
 ```
 .
-├── main.bicep
+├── apim-core.bicep
+├── apim-endpoints.bicep
 ├── template.parameters.json         # Template only — do not deploy directly
-├── apimService.bicep
+├── apim/
+│   ├── apim-service.bicep
 ├── apis/
 │   ├── restaurants-api.bicep
 │   └── openapi/
@@ -56,12 +58,12 @@ az account set --subscription "<your-subscription-id>"
 az group create --name my-apim-rg --location "East US"
 ```
 
-### 3. Deploy Bicep Template
+### 3. Deploy APIM Instance via Bicep Template
 
 ```bash
 az deployment group create      \
   --resource-group my-apim-rg   \
-  --template-file main.bicep    \
+  --template-file apim-core.bicep    \
   --parameters @main.parameters.json
 ```
 
