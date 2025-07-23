@@ -11,6 +11,9 @@ param apiId string
 @description('API Display Name')
 param displayName string
 
+@description('API Description')
+param apiDescription string = ''
+
 @description('Target backend service URL')
 @secure()
 param serviceUrl string = ''
@@ -44,6 +47,7 @@ resource api 'Microsoft.ApiManagement/service/apis@2023-03-01-preview' = {
   name: '${apimName}/${apiId}'
   properties: {
     displayName: displayName
+    description: apiDescription
     path: path
     format: format
     value: loadTextContent('__SPEC_PATH__')

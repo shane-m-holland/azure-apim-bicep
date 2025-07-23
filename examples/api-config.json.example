@@ -1,0 +1,143 @@
+[
+  {
+    "apiId": "petstore-demo-api",
+    "displayName": "Pet Store Demo API",
+    "path": "petstore",
+    "specPath": "./specs/petstore-openapi.json",
+    "format": "openapi+json",
+    "serviceUrl": "https://petstore.swagger.io/v2",
+    "protocols": ["https"],
+    "subscriptionRequired": false,
+    "productIds": ["starter", "unlimited"],
+    "gatewayNames": ["managed"],
+    "tags": ["demo", "public", "pets"],
+    "apiDescription": "Sample Pet Store API for demonstration purposes"
+  },
+  {
+    "apiId": "users-management-api",
+    "displayName": "Users Management API",
+    "path": "users",
+    "specPath": "./specs/users-openapi.json", 
+    "format": "openapi+json",
+    "serviceUrl": "https://users-api-dev.company.com",
+    "protocols": ["https"],
+    "subscriptionRequired": true,
+    "productIds": ["unlimited"],
+    "gatewayNames": ["managed"],
+    "tags": ["users", "management", "internal"],
+    "apiDescription": "Internal user management and authentication API",
+    "policies": {
+      "inbound": [
+        {
+          "type": "rate-limit",
+          "calls": 1000,
+          "renewal-period": 3600
+        },
+        {
+          "type": "ip-filter",
+          "action": "allow",
+          "addresses": ["10.0.0.0/8", "172.16.0.0/12"]
+        }
+      ]
+    }
+  },
+  {
+    "apiId": "orders-api",
+    "displayName": "Orders Processing API",
+    "path": "orders",
+    "specPath": "./specs/orders-openapi.json",
+    "format": "openapi+json", 
+    "serviceUrl": "https://orders-api-dev.company.com",
+    "protocols": ["https"],
+    "subscriptionRequired": true,
+    "productIds": ["unlimited"],
+    "gatewayNames": ["managed"],
+    "tags": ["orders", "ecommerce", "business"],
+    "apiDescription": "Order processing and management API for e-commerce operations",
+    "policies": {
+      "inbound": [
+        {
+          "type": "rate-limit",
+          "calls": 500,
+          "renewal-period": 3600
+        },
+        {
+          "type": "authentication-managed-identity",
+          "resource": "https://management.azure.com/"
+        }
+      ]
+    }
+  },
+  {
+    "apiId": "inventory-api", 
+    "displayName": "Inventory Management API",
+    "path": "inventory",
+    "specPath": "./specs/inventory-openapi.yaml",
+    "format": "openapi",
+    "serviceUrl": "https://inventory-api-dev.company.com",
+    "protocols": ["https"],
+    "subscriptionRequired": true,
+    "productIds": ["unlimited"],
+    "gatewayNames": ["managed"],
+    "tags": ["inventory", "warehouse", "business"],
+    "apiDescription": "Inventory tracking and warehouse management API"
+  },
+  {
+    "apiId": "payments-api",
+    "displayName": "Payment Processing API", 
+    "path": "payments",
+    "specPath": "./specs/payments-openapi.json",
+    "format": "openapi+json",
+    "serviceUrl": "https://payments-api-dev.company.com",
+    "protocols": ["https"],
+    "subscriptionRequired": true,
+    "productIds": ["premium"],
+    "gatewayNames": ["managed"],
+    "tags": ["payments", "financial", "secure"],
+    "apiDescription": "Secure payment processing and transaction management API",
+    "policies": {
+      "inbound": [
+        {
+          "type": "rate-limit",
+          "calls": 100,
+          "renewal-period": 3600
+        },
+        {
+          "type": "validate-jwt",
+          "header-name": "Authorization",
+          "failed-validation-httpcode": 401,
+          "require-expiration-time": true,
+          "require-signed-tokens": true
+        }
+      ]
+    }
+  },
+  {
+    "apiId": "weather-external-api",
+    "displayName": "Weather Service API",
+    "path": "weather",
+    "specPath": "./specs/weather-openapi.yaml",
+    "format": "openapi",
+    "serviceUrl": "https://api.openweathermap.org",
+    "protocols": ["https"],
+    "subscriptionRequired": false,
+    "productIds": ["starter", "unlimited"],
+    "gatewayNames": ["managed"],
+    "tags": ["weather", "external", "public"],
+    "apiDescription": "External weather data service integration"
+  },
+  {
+    "apiId": "notifications-api",
+    "displayName": "Notifications API",
+    "path": "notifications",
+    "specPath": "./specs/notifications-openapi.json",
+    "format": "openapi+json",
+    "serviceUrl": "https://notifications-api-dev.company.com",
+    "protocols": ["https"],
+    "subscriptionRequired": true,
+    "productIds": ["unlimited"],
+    "gatewayNames": ["managed"],
+    "tags": ["notifications", "messaging", "internal"],
+    "apiDescription": "Internal notification and messaging service API"
+  }
+]

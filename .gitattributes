@@ -1,0 +1,17 @@
+# Ensure shell scripts have Unix line endings and are treated as text
+*.sh text eol=lf
+
+# Ensure shell scripts in scripts directory are executable
+scripts/*.sh text eol=lf
+
+# Ensure Bicep files have consistent line endings
+*.bicep text eol=lf
+
+# Ensure JSON files have consistent line endings
+*.json text eol=lf
+
+# Ensure configuration files have Unix line endings
+*.env text eol=lf
+
+# Ensure markdown files have consistent line endings
+*.md text eol=lf

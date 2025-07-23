@@ -14,7 +14,7 @@ resource starterProduct 'Microsoft.ApiManagement/service/products@2024-06-01-pre
     displayName: 'Starter'
     description: 'Limited usage product for testing'
     terms: 'Limited to 5 calls/minute.'
-    subscriptionRequired: false       // Requires subscription to access APIs
+    subscriptionRequired: true        // Requires subscription to access APIs
     approvalRequired: false           // Auto-approve subscriptions
     subscriptionsLimit: 1             // Only one subscription allowed per user
     state: 'published'                // Makes the product publicly visible
@@ -30,7 +30,7 @@ resource unlimitedProduct 'Microsoft.ApiManagement/service/products@2024-06-01-p
     displayName: 'Unlimited'
     description: 'Unlimited usage for internal teams'
     terms: 'Internal use only.'
-    subscriptionRequired: false      // Still requires a subscription
+    subscriptionRequired: true       // Requires a subscription
     approvalRequired: false          // No manual approval needed
     state: 'published'               // Visible in the developer portal
   }
