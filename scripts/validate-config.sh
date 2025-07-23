@@ -79,6 +79,115 @@ usage() {
 # Validation Functions
 # ──────────────────────────────────────────────────────────────────────────────
 
+validate_wsdl_spec() {
+    local spec_path="$1"
+    
+    # Check if xmllint is available for XML validation
+    if command -v xmllint &> /dev/null; then
+        if xmllint --noout "$spec_path" 2>/dev/null; then
+            pass "WSDL file has valid XML syntax"
+            
+            # Check for WSDL-specific elements
+            if grep -q "definitions.*xmlns.*wsdl" "$spec_path" && grep -qE "<(wsdl:|tns:)?(service|binding|portType)[ >]" "$spec_path"; then
+                pass "WSDL file contains required WSDL elements"
+            else
+                warn "File appears to be XML but may not be a valid WSDL (missing WSDL namespace or elements)"
+            fi
+        else
+            fail "WSDL file has invalid XML syntax: $spec_path"
+        fi
+    else
+        # Basic validation without xmllint
+        if grep -q "<?xml" "$spec_path" && grep -q "definitions" "$spec_path"; then
+            pass "WSDL file appears to have basic XML structure"
+            
+            # Check for WSDL namespace
+            if grep -q "xmlns.*wsdl" "$spec_path"; then
+                pass "WSDL file contains WSDL namespace"
+            else
+                warn "WSDL file may be missing WSDL namespace declaration"
+            fi
+            
+            # Check for WSDL elements
+            local wsdl_elements=("service" "binding" "portType" "message" "types")
+            local found_elements=0
+            for element in "${wsdl_elements[@]}"; do
+                if grep -qE "<(wsdl:|tns:)?$element[ >]" "$spec_path"; then
+                    ((found_elements++))
+                fi
+            done
+            
+            if [[ $found_elements -ge 2 ]]; then
+                pass "WSDL file contains $found_elements WSDL elements"
+            else
+                warn "WSDL file may be incomplete (found only $found_elements WSDL elements)"
+            fi
+        else
+            fail "WSDL file does not appear to be valid XML"
+        fi
+        
+        warn "xmllint not available - WSDL validation is limited. Install libxml2-utils for complete validation."
+    fi
+}
+
+validate_openapi_spec() {
+    local spec_path="$1"
+    local is_yaml=false
+    
+    # Determine if it's YAML or JSON
+    case "$spec_path" in
+        *.yaml|*.yml) is_yaml=true ;;
+    esac
+    
+    # Check for OpenAPI version indicators
+    if [[ "$is_yaml" == "true" ]]; then
+        if command -v yq &> /dev/null; then
+            local openapi_version=$(yq eval '.openapi // .swagger // empty' "$spec_path" 2>/dev/null)
+            if [[ -n "$openapi_version" ]]; then
+                pass "OpenAPI spec version: $openapi_version"
+                
+                # Basic OpenAPI structure validation
+                local required_fields=("info" "paths")
+                for field in "${required_fields[@]}"; do
+                    if yq eval "has(\"$field\")" "$spec_path" 2>/dev/null | grep -q "true"; then
+                        pass "OpenAPI spec has required field: $field"
+                    else
+                        fail "OpenAPI spec missing required field: $field"
+                    fi
+                done
+            else
+                warn "No OpenAPI/Swagger version found in YAML spec"
+            fi
+        fi
+    else
+        # JSON validation
+        local openapi_version=$(jq -r '.openapi // .swagger // empty' "$spec_path" 2>/dev/null)
+        if [[ -n "$openapi_version" && "$openapi_version" != "null" ]]; then
+            pass "OpenAPI spec version: $openapi_version"
+            
+            # Basic OpenAPI structure validation
+            local required_fields=("info" "paths")
+            for field in "${required_fields[@]}"; do
+                if jq -e "has(\"$field\")" "$spec_path" >/dev/null 2>&1; then
+                    pass "OpenAPI spec has required field: $field"
+                else
+                    fail "OpenAPI spec missing required field: $field"
+                fi
+            done
+            
+            # Check for common OpenAPI fields
+            local common_fields=("servers" "components" "security")
+            for field in "${common_fields[@]}"; do
+                if jq -e "has(\"$field\")" "$spec_path" >/dev/null 2>&1; then
+                    pass "OpenAPI spec has optional field: $field"
+                fi
+            done
+        else
+            warn "No OpenAPI/Swagger version found in JSON spec"
+        fi
+    fi
+}
+
 validate_prerequisites() {
     log "Validating prerequisites..."
     
@@ -326,11 +435,13 @@ validate_api_config() {
             if [[ -f "$spec_path" ]]; then
                 pass "Spec file exists: $spec_path"
                 
-                # Validate spec file content
+                # Validate spec file content based on format
                 case "$spec_path" in
                     *.json)
                         if jq empty "$spec_path" 2>/dev/null; then
                             pass "Spec file has valid JSON syntax"
+                            # Additional OpenAPI validation for JSON files
+                            validate_openapi_spec "$spec_path"
                         else
                             fail "Spec file has invalid JSON syntax: $spec_path"
                         fi
@@ -340,6 +451,8 @@ validate_api_config() {
                         if command -v yq &> /dev/null; then
                             if yq eval '.' "$spec_path" >/dev/null 2>&1; then
                                 pass "Spec file has valid YAML syntax"
+                                # Additional OpenAPI validation for YAML files
+                                validate_openapi_spec "$spec_path"
                             else
                                 fail "Spec file has invalid YAML syntax: $spec_path"
                             fi
@@ -347,13 +460,45 @@ validate_api_config() {
                             warn "yq not available - skipping YAML validation for $spec_path"
                         fi
                         ;;
+                    *.wsdl|*.xml)
+                        # WSDL/XML validation
+                        validate_wsdl_spec "$spec_path"
+                        ;;
                     *)
-                        warn "Unknown spec file format: $spec_path"
+                        warn "Unknown spec file format: $spec_path (supported: .json, .yaml, .yml, .wsdl, .xml)"
                         ;;
                 esac
             else
                 fail "Spec file not found: $spec_path"
             fi
+        fi
+        
+        # Validate format field matches spec file extension
+        local format=$(echo "$api" | jq -r '.format // empty')
+        if [[ -n "$format" && -n "$spec_path" ]]; then
+            case "$spec_path" in
+                *.json)
+                    if [[ "$format" == "openapi+json" || "$format" == "openapi" || "$format" == "swagger-json" ]]; then
+                        pass "Format '$format' matches JSON spec file"
+                    else
+                        warn "Format '$format' may not match JSON spec file (recommended: openapi+json)"
+                    fi
+                    ;;
+                *.yaml|*.yml)
+                    if [[ "$format" == "openapi" || "$format" == "swagger-yaml" ]]; then
+                        pass "Format '$format' matches YAML spec file"
+                    else
+                        warn "Format '$format' may not match YAML spec file (recommended: openapi)"
+                    fi
+                    ;;
+                *.wsdl|*.xml)
+                    if [[ "$format" == "wsdl" || "$format" == "wsdl-link" ]]; then
+                        pass "Format '$format' matches WSDL spec file"
+                    else
+                        warn "Format '$format' may not match WSDL spec file (recommended: wsdl)"
+                    fi
+                    ;;
+            esac
         fi
         
         # Validate array fields
