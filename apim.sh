@@ -116,10 +116,15 @@ CONFIGURATION:
     Configuration files are auto-discovered (YAML preferred, JSON fallback).
 
 ENVIRONMENT MANAGEMENT:
-    Environments are managed in the environments/ directory:
+    Environments are managed in the environments/ directory using any valid name:
     - environments/dev/     - Development configuration
     - environments/staging/ - Staging configuration  
     - environments/prod/    - Production configuration
+    - environments/test/    - Test configuration
+    - environments/uat/     - User acceptance testing
+    - environments/demo/    - Demo configuration
+    
+    Environment names must contain only letters, numbers, hyphens, and underscores.
 
 For detailed help on any command, use:
     apim <command> --help
@@ -138,10 +143,12 @@ show_command_help() {
             echo "Interactive setup for new environments"
             echo ""
             echo "Arguments:"
-            echo "  environment    Environment name (dev, staging, prod) - optional"
+            echo "  environment    Environment name (any valid name) - optional"
             echo ""
             echo "Examples:"
             echo "  apim setup dev"
+            echo "  apim setup test"
+            echo "  apim setup demo"
             echo "  apim setup"
             ;;
         "validate")
@@ -156,7 +163,8 @@ show_command_help() {
             echo "Examples:"
             echo "  apim validate"
             echo "  apim validate dev"
-            echo "  apim validate dev ./my-apis.yaml"
+            echo "  apim validate uat ./my-apis.yaml"
+            echo "  apim validate test"
             ;;
         "deploy")
             case "$subcommand" in
@@ -166,14 +174,15 @@ show_command_help() {
                     echo "Deploy APIM infrastructure using Bicep templates"
                     echo ""
                     echo "Arguments:"
-                    echo "  environment    Target environment (dev, staging, prod)"
+                    echo "  environment    Target environment (any valid name)"
                     echo ""
                     echo "Options:"
                     echo "  --dry-run      Validate deployment without creating resources"
                     echo ""
                     echo "Examples:"
                     echo "  apim deploy infrastructure dev"
-                    echo "  apim deploy infrastructure prod --dry-run"
+                    echo "  apim deploy infrastructure test --dry-run"
+                    echo "  apim deploy infrastructure uat"
                     ;;
                 "apis")
                     echo "apim deploy apis <environment> [config-file] [--dry-run] [--parallel] [--verbose]"
@@ -181,7 +190,7 @@ show_command_help() {
                     echo "Deploy APIs to APIM instance"
                     echo ""
                     echo "Arguments:"
-                    echo "  environment    Target environment (dev, staging, prod)"
+                    echo "  environment    Target environment (any valid name)"
                     echo "  config-file    API configuration file (JSON/YAML, auto-discovered if omitted)"
                     echo ""
                     echo "Options:"
@@ -191,7 +200,8 @@ show_command_help() {
                     echo ""
                     echo "Examples:"
                     echo "  apim deploy apis dev"
-                    echo "  apim deploy apis prod ./my-apis.yaml --parallel"
+                    echo "  apim deploy apis demo ./my-apis.yaml --parallel"
+                    echo "  apim deploy apis local --verbose"
                     ;;
                 *)
                     echo "apim deploy <target> <environment> [options...]"
@@ -212,7 +222,7 @@ show_command_help() {
             echo "Intelligent API synchronization - only deploys changed APIs"
             echo ""
             echo "Arguments:"
-            echo "  environment    Target environment (dev, staging, prod)"
+            echo "  environment    Target environment (any valid name)"
             echo "  config-file    API configuration file (JSON/YAML, auto-discovered if omitted)"
             echo ""
             echo "Options:"
@@ -221,7 +231,8 @@ show_command_help() {
             echo ""
             echo "Examples:"
             echo "  apim sync dev"
-            echo "  apim sync prod ./my-apis.yaml --force-all"
+            echo "  apim sync uat ./my-apis.yaml --force-all"
+            echo "  apim sync test --debug"
             ;;
         "destroy")
             case "$subcommand" in
@@ -231,7 +242,7 @@ show_command_help() {
                     echo "Destroy APIM infrastructure"
                     echo ""
                     echo "Arguments:"
-                    echo "  environment    Target environment (dev, staging, prod)"
+                    echo "  environment    Target environment (any valid name)"
                     echo ""
                     echo "Options:"
                     echo "  --force        Skip confirmation prompts"
@@ -240,7 +251,8 @@ show_command_help() {
                     echo ""
                     echo "Examples:"
                     echo "  apim destroy infrastructure dev"
-                    echo "  apim destroy infrastructure prod --purge"
+                    echo "  apim destroy infrastructure test --purge"
+                    echo "  apim destroy infrastructure demo --force"
                     ;;
                 "apis")
                     echo "apim destroy apis <environment> [config-file] [--dry-run] [--force] [--verbose]"
@@ -248,7 +260,7 @@ show_command_help() {
                     echo "Delete APIs from APIM instance"
                     echo ""
                     echo "Arguments:"
-                    echo "  environment    Target environment (dev, staging, prod)"
+                    echo "  environment    Target environment (any valid name)"
                     echo "  config-file    API configuration file (JSON/YAML, auto-discovered if omitted)"
                     echo ""
                     echo "Options:"
@@ -258,7 +270,8 @@ show_command_help() {
                     echo ""
                     echo "Examples:"
                     echo "  apim destroy apis dev --dry-run"
-                    echo "  apim destroy apis prod --force"
+                    echo "  apim destroy apis local --force"
+                    echo "  apim destroy apis test --verbose"
                     ;;
                 *)
                     echo "apim destroy <target> <environment> [options...]"
@@ -288,17 +301,30 @@ show_command_help() {
 
 validate_environment() {
     local env="$1"
-    local valid_envs=("dev" "staging" "prod")
     
-    for valid_env in "${valid_envs[@]}"; do
-        if [[ "$env" == "$valid_env" ]]; then
-            return 0
-        fi
-    done
+    # Check if environment name is empty
+    if [[ -z "$env" ]]; then
+        error "Environment name cannot be empty"
+        exit 1
+    fi
     
-    error "Invalid environment: $env"
-    echo "Valid environments: ${valid_envs[*]}"
-    exit 1
+    # Validate environment name contains only safe characters
+    # Allow alphanumeric characters, hyphens, and underscores (no spaces)
+    if [[ ! "$env" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        error "Invalid environment name: $env"
+        echo "Environment names must contain only letters, numbers, hyphens, and underscores (no spaces)"
+        echo "Examples: dev, staging, prod, test, uat, demo, local, dev-v2, test_env"
+        exit 1
+    fi
+    
+    # Check if environment name is not too long (filesystem limits)
+    if [[ ${#env} -gt 50 ]]; then
+        error "Environment name too long: $env (maximum 50 characters)"
+        exit 1
+    fi
+    
+    # Environment is valid - the directory will be created if it doesn't exist
+    return 0
 }
 
 check_script_exists() {
