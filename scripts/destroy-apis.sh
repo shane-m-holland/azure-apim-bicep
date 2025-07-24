@@ -10,6 +10,9 @@
 
 set -euo pipefail
 
+# Source configuration utilities
+source "$(dirname "${BASH_SOURCE[0]}")/lib/config-utils.sh"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -54,7 +57,8 @@ usage() {
     echo ""
     echo "Arguments:"
     echo "  environment    Environment to load config from (dev, staging, prod)"
-    echo "  config-file    API configuration file (default: ./environments/\$ENV/api-config.json)"
+    echo "  config-file    API configuration file (JSON/YAML supported)"
+    echo "                 Default: auto-discover api-config.yaml or api-config.json"
     echo ""
     echo "Options:"
     echo "  --dry-run      Show what would be deleted without actually deleting"
@@ -65,7 +69,7 @@ usage() {
     echo "  $0 dev                    # Delete APIs in dev environment"
     echo "  $0 prod --dry-run         # Preview what would be deleted in prod"
     echo "  $0 staging --force        # Delete APIs without confirmation"
-    echo "  $0 dev --verbose          # Show detailed deletion progress"
+    echo "  $0 dev ./my-apis.yaml     # Delete APIs from YAML config"
     exit 1
 }
 
@@ -175,7 +179,8 @@ if [[ $# -lt 1 ]]; then
 fi
 
 ENVIRONMENT="$1"
-CONFIG_FILE="./environments/${ENVIRONMENT}/api-config.json"
+# Auto-discover config file (prefer YAML, fallback to JSON)
+CONFIG_FILE=$(find_config_file "./environments/${ENVIRONMENT}/api-config" "api-config" 2>/dev/null || echo "./environments/${ENVIRONMENT}/api-config.json")
 DRY_RUN=false
 FORCE=false
 VERBOSE=false
@@ -250,15 +255,17 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     exit 1
 fi
 
-# Validate JSON syntax
-if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
-    error "Invalid JSON in configuration file: $CONFIG_FILE"
+# Validate configuration syntax (JSON/YAML)
+if ! validate_config_syntax "$CONFIG_FILE"; then
+    config_format=$(detect_config_format "$CONFIG_FILE")
+    format_display=$(get_config_format_display_name "$config_format")
+    error "Invalid $format_display syntax in configuration file: $CONFIG_FILE"
     exit 1
 fi
 
-# Check if jq is installed
-if ! command -v jq &> /dev/null; then
-    error "jq is required but not installed. Please install jq first."
+# Check configuration processing dependencies
+if ! check_config_dependencies; then
+    error "Missing required dependencies for configuration processing"
     exit 1
 fi
 
@@ -289,9 +296,12 @@ fi
 # Process Configuration
 # ──────────────────────────────────────────────────────────────────────────────
 
-CONFIG_CONTENT=$(cat "$CONFIG_FILE")
-SUBSTITUTED_CONFIG=$(substitute_env_vars "$CONFIG_CONTENT")
+# Read and process configuration (handles both JSON and YAML)
+CONFIG_CONTENT=$(get_config_content "$CONFIG_FILE")
+CONFIG_FORMAT=$(detect_config_format "$CONFIG_FILE")
+SUBSTITUTED_CONFIG=$(substitute_env_vars_in_config "$CONFIG_CONTENT" "$CONFIG_FORMAT")
 
+# Get API count (SUBSTITUTED_CONFIG is JSON format after processing)
 API_COUNT=$(echo "$SUBSTITUTED_CONFIG" | jq length)
 if [[ "$API_COUNT" -eq 0 ]]; then
     warning "No APIs found in configuration file"
@@ -326,7 +336,7 @@ while read -r api; do
     else
         echo "  ❌ $api_id ($display_name) - NOT FOUND"
     fi
-done < <(echo "$SUBSTITUTED_CONFIG" | jq -c '.[]')
+done < <(echo "$SUBSTITUTED_CONFIG" | jq -c '.[]')  # SUBSTITUTED_CONFIG is JSON format after processing
 
 echo ""
 
@@ -353,7 +363,7 @@ fi
 # Process each API using process substitution to avoid subshell issues
 while read -r api; do
     delete_api "$RG" "$APIM_NAME" "$api"
-done < <(echo "$SUBSTITUTED_CONFIG" | jq -c '.[]')
+done < <(echo "$SUBSTITUTED_CONFIG" | jq -c '.[]')  # SUBSTITUTED_CONFIG is JSON format after processing
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Summary

@@ -6,6 +6,8 @@
 
 This project provides a comprehensive shell script-driven Azure API Management (APIM) deployment solution using Bicep Infrastructure as Code. Features include:
 
+- **🎯 Unified CLI Interface**: Single entry point (`apim.sh`) for all operations
+- **📝 YAML Configuration Support**: Modern YAML configs with comments + full JSON backward compatibility
 - **🔒 Security-First Configuration**: No secrets or environment-specific data committed to repository
 - **🌍 Environment-Based Deployment**: Separate configurations for dev/staging/prod environments  
 - **🧠 Intelligent API Synchronization**: Deploy only changed APIs for faster updates
@@ -15,6 +17,7 @@ This project provides a comprehensive shell script-driven Azure API Management (
 - **🛠️ Advanced Debugging**: Verbose and debug modes for troubleshooting
 - **🔄 Flexible Deployment Options**: Dry-run, parallel, and force modes
 - **♻️ Lifecycle Management**: Complete infrastructure and API lifecycle support
+- **🌐 Multi-Format API Support**: OpenAPI/Swagger (JSON/YAML) and WSDL/SOAP specifications
 
 ## 🏗️ Architecture Components
 
@@ -32,6 +35,7 @@ This project provides a comprehensive shell script-driven Azure API Management (
 ```
 .
 ├── README.md                        # Project documentation
+├── apim.sh                          # 🆕 Unified CLI entry point (recommended)
 ├── bicep/                           # Infrastructure as Code
 │   ├── main.bicep                   # Main deployment entry point
 │   ├── apim/                        # APIM service templates
@@ -41,18 +45,21 @@ This project provides a comprehensive shell script-driven Azure API Management (
 │   ├── gateways/                    # Self-hosted gateway config
 │   └── diagnostics/                 # Monitoring and logging
 ├── scripts/                         # Deployment automation
+│   ├── lib/                         # 🆕 Shared utility libraries
+│   │   └── config-utils.sh          # Configuration parsing (JSON/YAML)
 │   ├── setup-environment.sh         # Interactive environment setup
-│   ├── validate-config.sh           # Configuration validation
+│   ├── validate-config.sh           # Configuration validation (YAML/JSON support)
 │   ├── deploy-infrastructure.sh     # Infrastructure deployment
-│   ├── deploy-apis.sh               # API deployment with parallel/verbose modes
-│   ├── sync-apis.sh                 # Intelligent API synchronization with debugging
-│   ├── destroy-apis.sh              # API cleanup with safety checks
+│   ├── deploy-apis.sh               # API deployment (YAML/JSON support)
+│   ├── sync-apis.sh                 # Intelligent API synchronization (YAML/JSON)
+│   ├── destroy-apis.sh              # API cleanup (YAML/JSON support)
 │   └── destroy-infrastructure.sh    # Infrastructure cleanup with purge options
 ├── environments/                    # Environment configs (created locally)
 ├── examples/                        # Configuration templates
 │   ├── config.env.example           # Environment configuration template
-│   └── api-config.json.example      # API configuration template
-└── specs/                           # OpenAPI/WSDL specifications
+│   ├── api-config.yaml.example      # 🆕 YAML API configuration template (recommended)
+│   └── api-config.json.example      # JSON API configuration template (legacy)
+└── specs/                           # OpenAPI/WSDL/SOAP specifications
 ```
 
 ---
@@ -60,9 +67,12 @@ This project provides a comprehensive shell script-driven Azure API Management (
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Azure CLI installed and configured
-- jq installed for JSON processing  
-- Bicep CLI installed: `az bicep install`
+- **Azure CLI**: Required for all Azure operations
+- **jq**: Required for JSON processing in scripts
+- **yq**: Required for YAML processing (install with `pip install yq` or `brew install yq`)
+- **Bicep CLI**: Install with `az bicep install`
+- **Azure Login**: Run `az login` before deployment
+- **Environment Variables**: Set `AZURE_SUBSCRIPTION_ID` for your target subscription
 
 ### Initial Setup
 ```bash
@@ -71,59 +81,102 @@ git clone <this-repo>
 cd azure-apim-bicep
 
 # Make shell scripts executable (required on Unix/Linux/macOS)
-chmod +x scripts/*.sh
+chmod +x apim.sh scripts/*.sh
 ```
 
-### 1. First Time Setup
+### Using the Unified CLI (Recommended)
+
+The project now includes a unified CLI interface (`apim.sh`) that provides a single entry point for all operations:
 
 ```bash
-# Clone and setup
-git clone <this-repo>
-cd azure-apim-bicep
+# Interactive environment setup
+./apim.sh setup dev
 
-# Create your environment configuration from examples
+# Validate configuration (supports both YAML and JSON)
+./apim.sh validate dev
+
+# Deploy infrastructure (30-45 minutes first time)
+./apim.sh deploy infrastructure dev
+
+# Deploy APIs (supports YAML/JSON configuration auto-discovery)
+./apim.sh deploy apis dev
+
+# Smart synchronization (only deploy changed APIs)
+./apim.sh sync dev
+
+# Get help
+./apim.sh help
+```
+
+### Manual Script Usage (Advanced)
+
+You can also use the scripts directly for more control:
+
+```bash
+# 1. Setup environment configuration
 mkdir -p environments/dev
 cp examples/config.env.example environments/dev/config.env
+
+# Choose your preferred configuration format:
+# YAML (recommended - supports comments)
+cp examples/api-config.yaml.example environments/dev/api-config.yaml
+# OR JSON (legacy support)
 cp examples/api-config.json.example environments/dev/api-config.json
 
-# Edit the configuration files with your values
+# 2. Edit configurations with your values
 vim environments/dev/config.env
-vim environments/dev/api-config.json
-```
+vim environments/dev/api-config.yaml  # or api-config.json
 
-### 2. Login to Azure
-
-```bash
+# 3. Login to Azure
 az login
 az account set --subscription "<your-subscription-id>"
-```
 
-### 3. Validate Configuration
-
-```bash
+# 4. Validate configuration
 ./scripts/validate-config.sh dev
-```
 
-### 4. Deploy Infrastructure
-
-```bash
-# Deploy APIM infrastructure (takes 30-45 minutes)
+# 5. Deploy infrastructure
 ./scripts/deploy-infrastructure.sh dev
 
-# Deploy APIs
+# 6. Deploy APIs
 ./scripts/deploy-apis.sh dev
-```
 
-### 5. Subsequent Updates
-
-```bash
-# For faster API updates, use sync (deploys only changed APIs)
+# 7. For updates, use smart sync
 ./scripts/sync-apis.sh dev
 ```
 
 ## 📜 Script Reference
 
-All scripts follow a consistent environment-based pattern and include comprehensive error handling, logging, and safety features.
+All scripts follow a consistent environment-based pattern and include comprehensive error handling, logging, and safety features. They support both YAML and JSON configuration formats with automatic format detection.
+
+### 🎯 Unified CLI (apim.sh)
+**Single entry point for all operations (Recommended)**
+
+```bash
+./apim.sh <command> <environment> [options...]
+```
+
+**Available Commands:**
+- **`setup`**: Interactive environment configuration setup
+- **`validate`**: Comprehensive configuration validation  
+- **`deploy infrastructure`**: Deploy APIM infrastructure
+- **`deploy apis`**: Deploy APIs from configuration
+- **`sync`**: Intelligent API synchronization with change detection
+- **`destroy apis`**: Safe API deletion with confirmation
+- **`destroy infrastructure`**: Infrastructure cleanup
+- **`help`**: Show detailed help information
+
+**Common Examples:**
+```bash
+./apim.sh setup dev                    # Interactive setup
+./apim.sh validate dev                 # Validate configurations
+./apim.sh deploy infrastructure dev    # Deploy APIM (30-45 min)
+./apim.sh deploy apis dev --parallel   # Deploy APIs in parallel
+./apim.sh sync dev                     # Smart sync (changed APIs only)
+./apim.sh help                         # Show all available options
+```
+
+### 🛠️ Individual Scripts
+**Direct script access for advanced usage**
 
 ### 🎛️ setup-environment.sh
 **Interactive environment configuration setup**
@@ -144,7 +197,8 @@ All scripts follow a consistent environment-based pattern and include comprehens
 ```
 
 - **Purpose**: Validates all configurations before deployment
-- **Features**: JSON validation, Bicep compilation, API spec validation
+- **Features**: YAML/JSON validation, Bicep compilation, API spec validation (OpenAPI/WSDL)
+- **Supports**: Auto-detection of YAML/JSON configuration formats
 - **Options**:
   - `--verbose`: Show detailed validation output
 - **Example**: `./scripts/validate-config.sh dev --verbose`
@@ -169,8 +223,9 @@ All scripts follow a consistent environment-based pattern and include comprehens
 ./scripts/deploy-apis.sh <environment> [config-file] [--dry-run] [--parallel] [--verbose]
 ```
 
-- **Purpose**: Deploy all APIs from configuration
-- **Features**: Environment variable substitution, resource validation, error reporting
+- **Purpose**: Deploy all APIs from YAML/JSON configuration
+- **Features**: Environment variable substitution, YAML/JSON auto-detection, resource validation, error reporting
+- **Supports**: OpenAPI (JSON/YAML) and WSDL/SOAP specifications
 - **Options**:
   - `--dry-run`: Validate configuration without deploying
   - `--parallel`: Deploy APIs in parallel for faster execution
@@ -184,8 +239,9 @@ All scripts follow a consistent environment-based pattern and include comprehens
 ./scripts/sync-apis.sh <environment> [config-file] [--force-all] [--debug]
 ```
 
-- **Purpose**: Deploy only changed APIs for faster updates
-- **Features**: Change detection, intelligent comparison, comprehensive debugging
+- **Purpose**: Deploy only changed APIs for faster updates (supports YAML/JSON)
+- **Features**: Change detection, intelligent comparison, YAML/JSON auto-detection, comprehensive debugging
+- **Supports**: OpenAPI (JSON/YAML) and WSDL/SOAP specifications
 - **Options**:
   - `--force-all`: Deploy all APIs regardless of changes
   - `--debug`: Enable detailed debugging output with raw Azure CLI responses
@@ -198,8 +254,8 @@ All scripts follow a consistent environment-based pattern and include comprehens
 ./scripts/destroy-apis.sh <environment> [config-file] [--dry-run] [--force] [--verbose]
 ```
 
-- **Purpose**: Delete APIs with safety checks and confirmation
-- **Features**: Existence checking, confirmation prompts, detailed summary
+- **Purpose**: Delete APIs with safety checks and confirmation (supports YAML/JSON)
+- **Features**: Existence checking, confirmation prompts, YAML/JSON auto-detection, detailed summary
 - **Options**:
   - `--dry-run`: Preview what would be deleted without deleting
   - `--force`: Skip confirmation prompts
@@ -273,55 +329,140 @@ SUBSCRIPTION_ID=your-target-subscription-id
 
 ## 📡 API Configuration
 
-APIs are deployed from OpenAPI/WSDL specifications with support for environment variable substitution.
+APIs are deployed from OpenAPI/WSDL specifications with support for both YAML and JSON configuration formats, plus environment variable substitution.
 
-### Configuration Structure
+### Configuration Format Support
 
-Each API in `api-config.json` supports the following parameters:
+The project supports **both YAML and JSON** configuration formats with automatic discovery:
 
-```json
-{
-  "apiId": "my-api",
-  "displayName": "My API",
-  "apiDescription": "Description of my API",
-  "path": "myapi",
-  "format": "openapi+json",
-  "specPath": "./specs/my-api.openapi.json",
-  "serviceUrl": "${BACKEND_URL}",
-  "protocols": ["https"],
-  "subscriptionRequired": false,
-  "productIds": ["unlimited"],
-  "gatewayNames": ["managed"],
-  "tags": ["business", "v1"]
-}
+- **YAML (Recommended)**: `api-config.yaml` - Supports comments, better readability, cleaner syntax
+- **JSON (Legacy)**: `api-config.json` - Traditional format, still fully supported
+- **Auto-discovery**: Scripts prefer YAML, fallback to JSON if YAML not found
+
+### Configuration Structure Examples
+
+**YAML Configuration (Recommended):**
+```yaml
+# YAML supports comments for better documentation
+- apiId: my-api                    # Unique identifier for the API
+  displayName: My API              # Human-readable name
+  path: myapi                      # URL path segment
+  specPath: ./specs/my-api.json    # Path to OpenAPI/WSDL specification
+  format: openapi+json             # Specification format
+  serviceUrl: ${BACKEND_URL}       # Backend service URL (with env vars)
+  protocols:                       # Supported protocols
+    - https
+  subscriptionRequired: false      # Whether subscription key is required
+  productIds:                      # APIM products to associate with
+    - unlimited
+  gatewayNames:                    # Gateways where API should be available
+    - managed
+  tags:                           # Tags for categorization
+    - business
+    - v1
+  apiDescription: Description of my API
+  apiType: http                   # API type (http, soap, websocket, graphql)
 ```
 
-### Required Parameters
-- `apiId`: Unique identifier for the API
-- `displayName`: Human-readable name
-- `path`: URL path segment
-- `specPath`: Path to OpenAPI/WSDL specification file
+**JSON Configuration (Legacy):**
+```json
+[
+  {
+    "apiId": "my-api",
+    "displayName": "My API",
+    "path": "myapi",
+    "specPath": "./specs/my-api.json",
+    "format": "openapi+json",
+    "serviceUrl": "${BACKEND_URL}",
+    "protocols": ["https"],
+    "subscriptionRequired": false,
+    "productIds": ["unlimited"],
+    "gatewayNames": ["managed"],
+    "tags": ["business", "v1"],
+    "apiDescription": "Description of my API",
+    "apiType": "http"
+  }
+]
+```
 
-### Optional Parameters
-- `apiDescription`: API description (defaults to empty)
-- `format`: Specification format (`openapi+json`, `openapi`, `wsdl`)
-- `serviceUrl`: Backend service URL (supports environment variables)
-- `protocols`: Supported protocols (`["https"]`, `["http", "https"]`)
-- `subscriptionRequired`: Whether API requires subscription (default: `false`)
-- `productIds`: Array of product IDs to associate with
-- `gatewayNames`: Array of gateway names to associate with
-- `tags`: Array of tags for categorization
+### Multi-Format API Specification Support
+
+The project supports multiple API specification formats:
+
+#### OpenAPI/REST APIs
+- **JSON**: `.json` files (OpenAPI/Swagger specifications)
+- **YAML**: `.yaml`, `.yml` files (OpenAPI specifications)
+- **Formats**: `openapi+json`, `openapi`, `swagger-json`, `swagger-yaml`
+
+#### WSDL/SOAP APIs
+- **XML**: `.wsdl`, `.xml` files (SOAP web service descriptions)
+- **Formats**: `wsdl`, `wsdl-link`
+- **Validation**: Full XML validation, WSDL element checking, namespace validation
+
+### Configuration Properties Reference
+
+#### Required Properties
+- **`apiId`**: Unique identifier (alphanumeric, hyphens, underscores only)
+- **`displayName`**: Human-readable name for the API
+- **`path`**: URL path segment (will be prefixed with APIM gateway URL) 
+- **`specPath`**: Path to API specification file (OpenAPI JSON/YAML or WSDL/XML)
+
+#### Optional Properties
+- **`format`**: Specification format (default: `openapi+json`)
+  - OpenAPI: `openapi+json`, `openapi`, `swagger-json`, `swagger-yaml`
+  - WSDL: `wsdl`, `wsdl-link`
+- **`serviceUrl`**: Backend service URL (supports environment variables)
+- **`protocols`**: Array of supported protocols (default: `["https"]`)
+- **`subscriptionRequired`**: Whether subscription key is required (default: `false`)
+- **`productIds`**: Array of product IDs to associate with API (default: `["unlimited"]`)
+- **`gatewayNames`**: Array of gateway names (default: `["managed"]`)  
+- **`tags`**: Array of tags for categorization and discovery
+- **`apiDescription`**: Detailed description of the API
+- **`apiType`**: Type of API - `http`, `soap`, `websocket`, `graphql` (default: `http`)
+- **`policies`**: Advanced APIM policies (inbound, outbound, backend, on-error)
+
+#### Advanced Policy Configuration
+```yaml
+- apiId: secure-api
+  displayName: Secure API
+  # ... other properties ...
+  policies:
+    inbound:                         # Policies applied to incoming requests
+      - type: rate-limit             # Rate limiting policy
+        calls: 1000                  # Maximum calls per renewal period
+        renewal-period: 3600         # Period in seconds (1 hour)
+      - type: ip-filter              # IP address filtering
+        action: allow                # Allow or deny
+        addresses:                   # List of allowed IP ranges
+          - 10.0.0.0/8
+          - 172.16.0.0/12
+      - type: validate-jwt           # JWT token validation
+        header-name: Authorization
+        failed-validation-httpcode: 401
+        require-expiration-time: true
+        require-signed-tokens: true
+```
 
 ### Environment Variable Substitution
 
 Use `${VARIABLE_NAME}` syntax in any string value for environment-specific configuration:
 
+**YAML Example:**
+```yaml
+- apiId: users-api
+  serviceUrl: ${USERS_API_URL}           # From environment config
+  apiDescription: API for ${ENVIRONMENT} environment
+```
+
+**JSON Example:**
 ```json
 {
   "serviceUrl": "${API_BACKEND_URL}",
   "apiDescription": "API for ${ENVIRONMENT} environment"
 }
 ```
+
+Variables are substituted during deployment from your `environments/{env}/config.env` file.
 
 ---
 
@@ -372,6 +513,22 @@ az network nsg rule list --resource-group your-rg --nsg-name your-nsg --query "[
 # Problem: Bicep template compilation fails
 # Solution: Validate configuration and templates
 ./scripts/validate-config.sh dev --verbose
+```
+
+#### YAML/JSON Configuration Issues
+```bash
+# Problem: "yq is not installed - YAML configuration support will be limited"
+# Solution: Install yq for full YAML support
+pip install yq  # or brew install yq
+
+# Problem: YAML syntax errors
+# Solution: Use verbose validation to see detailed YAML parsing errors
+./scripts/validate-config.sh dev --verbose
+
+# Problem: Configuration not found
+# Solution: Scripts auto-discover config format (YAML preferred, JSON fallback)
+# Ensure you have either api-config.yaml OR api-config.json in your environment folder
+ls environments/dev/api-config.*
 ```
 
 ### Debug Workflows

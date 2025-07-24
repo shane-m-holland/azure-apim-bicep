@@ -10,6 +10,9 @@
 
 set -euo pipefail
 
+# Source configuration utilities
+source "$(dirname "${BASH_SOURCE[0]}")/lib/config-utils.sh"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -66,12 +69,14 @@ usage() {
     echo ""
     echo "Arguments:"
     echo "  environment    Environment to validate (dev, staging, prod) - optional"
-    echo "  config-file    API configuration file to validate (default: ./api-config.json)"
+    echo "  config-file    API configuration file to validate (JSON/YAML supported)"
+    echo "                 Default: auto-discover api-config.yaml or api-config.json"
     echo ""
     echo "Examples:"
     echo "  $0                          # Validate all environments and default config"
     echo "  $0 dev                      # Validate dev environment only"
-    echo "  $0 dev ./my-apis.json       # Validate dev environment with custom config"
+    echo "  $0 dev ./my-apis.yaml       # Validate dev environment with YAML config"
+    echo "  $0 dev ./my-apis.json       # Validate dev environment with JSON config"
     exit 1
 }
 
@@ -196,6 +201,15 @@ validate_prerequisites() {
         pass "jq is installed"
     else
         fail "jq is not installed - required for JSON processing"
+    fi
+    
+    # Check if yq is installed (for YAML support)
+    if command -v yq &> /dev/null; then
+        local yq_version=$(yq --version 2>/dev/null | head -n1 || echo "unknown")
+        pass "yq is installed ($yq_version)"
+    else
+        warn "yq is not installed - YAML configuration support will be limited"
+        echo "  Install yq with: pip install yq  # or brew install yq"
     fi
     
     # Check if Azure CLI is installed
@@ -368,24 +382,66 @@ validate_api_config() {
     
     pass "API configuration file exists"
     
-    # Validate JSON syntax
-    if jq empty "$config_file" 2>/dev/null; then
-        pass "API configuration has valid JSON syntax"
+    # Detect configuration format
+    local config_format=$(detect_config_format "$config_file")
+    local format_display=$(get_config_format_display_name "$config_format")
+    
+    if ! is_config_format_supported "$config_format"; then
+        fail "Unsupported configuration format: $config_format (supported: JSON, YAML)"
+        return
+    fi
+    
+    # Validate syntax based on format
+    if validate_config_syntax "$config_file"; then
+        pass "API configuration has valid $format_display syntax"
     else
-        fail "API configuration has invalid JSON syntax"
+        fail "API configuration has invalid $format_display syntax"
         return
     fi
     
     # Check if it's an array
-    if jq -e 'type == "array"' "$config_file" >/dev/null; then
-        pass "API configuration is a JSON array"
+    local is_array
+    case "$config_format" in
+        "json")
+            is_array=$(jq -e 'type == "array"' "$config_file" >/dev/null 2>&1 && echo "true" || echo "false")
+            ;;
+        "yaml")
+            if command -v yq &> /dev/null; then
+                is_array=$(yq eval 'type' "$config_file" 2>/dev/null | grep -q "!!seq" && echo "true" || echo "false")
+            else
+                warn "Cannot validate array type - yq not available"
+                is_array="unknown"
+            fi
+            ;;
+    esac
+    
+    if [[ "$is_array" == "true" ]]; then
+        pass "API configuration is a $format_display array"
+    elif [[ "$is_array" == "unknown" ]]; then
+        warn "Cannot validate if configuration is an array"
     else
-        fail "API configuration must be a JSON array"
+        fail "API configuration must be a $format_display array"
         return
     fi
     
-    local api_count=$(jq length "$config_file")
-    if [[ "$api_count" -gt 0 ]]; then
+    # Get API count
+    local api_count
+    case "$config_format" in
+        "json")
+            api_count=$(jq length "$config_file" 2>/dev/null || echo "0")
+            ;;
+        "yaml")
+            if command -v yq &> /dev/null; then
+                api_count=$(yq eval 'length' "$config_file" 2>/dev/null || echo "0")
+            else
+                api_count="unknown"
+            fi
+            ;;
+    esac
+    
+    if [[ "$api_count" == "unknown" ]]; then
+        warn "Cannot determine API count - yq not available"
+    elif [[ "$api_count" -gt 0 ]]; then
         pass "Found $api_count APIs in configuration"
     else
         warn "No APIs found in configuration"
@@ -526,7 +582,7 @@ validate_api_config() {
                 fi
             fi
         done
-    done < <(jq -c '.[]' "$config_file")
+    done < <(get_config_array_items "$config_file")
 }
 
 validate_bicep_templates() {
@@ -612,7 +668,13 @@ validate_bicep_templates() {
 # ──────────────────────────────────────────────────────────────────────────────
 
 ENVIRONMENT="${1:-}"
-CONFIG_FILE="${2:-./environments/${ENVIRONMENT:-dev}/api-config.json}"
+# If config file is provided as argument, use it directly; otherwise find config file
+if [[ -n "${2:-}" ]]; then
+    CONFIG_FILE="$2"
+else
+    # Auto-discover config file (prefer YAML, fallback to JSON)
+    CONFIG_FILE=$(find_config_file "./environments/${ENVIRONMENT:-dev}/api-config" "api-config" 2>/dev/null || echo "./environments/${ENVIRONMENT:-dev}/api-config.json")
+fi
 
 echo "🔍 APIM Configuration Validation"
 echo "═══════════════════════════════════════════"

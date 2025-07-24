@@ -1,0 +1,273 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# API Configuration Example (YAML)
+# ──────────────────────────────────────────────────────────────────────────────
+# This file demonstrates YAML configuration for Azure API Management (APIM) APIs.
+# YAML format allows for comments and better readability compared to JSON.
+# 
+# Supported Formats:
+# - OpenAPI/Swagger: JSON (.json) and YAML (.yaml/.yml) specifications
+# - WSDL/SOAP: XML (.wsdl/.xml) specifications
+#
+# Environment Variables:
+# - Use ${VARIABLE_NAME} syntax for environment variable substitution
+# - Variables are replaced during deployment from environment configuration
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Array of API configurations
+# Each API represents a service to be deployed to APIM
+
+# Example 1: Public Demo API (OpenAPI/REST)
+- apiId: petstore-demo-api              # Unique identifier for the API in APIM
+  displayName: Pet Store Demo API       # Human-readable name shown in portal
+  path: petstore                        # URL path segment (e.g., /petstore/pets)
+  specPath: ./specs/petstore-openapi.json  # Path to OpenAPI specification file
+  format: openapi+json                  # Specification format (openapi+json, openapi, wsdl, etc.)
+  serviceUrl: https://petstore.swagger.io/v2  # Backend service URL
+  protocols:                           # Supported protocols
+    - https
+  subscriptionRequired: false          # Whether API requires subscription key
+  productIds:                         # APIM products to associate with this API
+    - starter                          # Basic product for testing
+    - unlimited                        # Full access product
+  gatewayNames:                       # Gateways where API should be available
+    - managed                          # Built-in managed gateway
+  tags:                               # Tags for categorization and discovery
+    - demo
+    - public
+    - pets
+  apiDescription: Sample Pet Store API for demonstration purposes
+  apiType: http                       # API type: http, soap, websocket, graphql
+
+# Example 2: Internal Business API with Policies (OpenAPI/REST)
+- apiId: users-management-api
+  displayName: Users Management API
+  path: users
+  specPath: ./specs/users-openapi.json
+  format: openapi+json
+  serviceUrl: ${USERS_API_URL}          # Environment variable substitution
+  protocols:
+    - https
+  subscriptionRequired: true
+  productIds:
+    - unlimited
+  gatewayNames:
+    - managed
+  tags:
+    - users
+    - management
+    - internal
+  apiDescription: Internal user management and authentication API
+  apiType: http
+  # Optional: API-level policies for advanced scenarios
+  policies:
+    inbound:                          # Policies applied to incoming requests
+      - type: rate-limit              # Rate limiting policy
+        calls: 1000                   # Maximum calls per renewal period
+        renewal-period: 3600          # Period in seconds (1 hour)
+      - type: ip-filter               # IP address filtering
+        action: allow                 # Allow or deny
+        addresses:                    # List of allowed IP ranges
+          - 10.0.0.0/8
+          - 172.16.0.0/12
+
+# Example 3: E-commerce API with Advanced Security (OpenAPI/REST)
+- apiId: orders-api
+  displayName: Orders Processing API
+  path: orders
+  specPath: ./specs/orders-openapi.json
+  format: openapi+json
+  serviceUrl: ${ORDERS_API_URL}
+  protocols:
+    - https
+  subscriptionRequired: true
+  productIds:
+    - unlimited
+  gatewayNames:
+    - managed
+  tags:
+    - orders
+    - ecommerce
+    - business
+  apiDescription: Order processing and management API for e-commerce operations
+  apiType: http
+  policies:
+    inbound:
+      - type: rate-limit
+        calls: 500
+        renewal-period: 3600
+      - type: authentication-managed-identity  # Azure Managed Identity authentication
+        resource: https://management.azure.com/
+
+# Example 4: YAML OpenAPI Specification (OpenAPI/REST)
+- apiId: inventory-api
+  displayName: Inventory Management API
+  path: inventory
+  specPath: ./specs/inventory-openapi.yaml  # YAML OpenAPI specification
+  format: openapi                      # Format for YAML OpenAPI specs
+  serviceUrl: ${INVENTORY_API_URL}
+  protocols:
+    - https
+  subscriptionRequired: true
+  productIds:
+    - unlimited
+  gatewayNames:
+    - managed
+  tags:
+    - inventory
+    - warehouse
+    - business
+  apiDescription: Inventory tracking and warehouse management API
+  apiType: http
+
+# Example 5: High-Security Financial API (OpenAPI/REST)
+- apiId: payments-api
+  displayName: Payment Processing API
+  path: payments
+  specPath: ./specs/payments-openapi.json
+  format: openapi+json
+  serviceUrl: ${PAYMENTS_API_URL}
+  protocols:
+    - https
+  subscriptionRequired: true
+  productIds:
+    - premium                         # Premium product for sensitive APIs
+  gatewayNames:
+    - managed
+    # - secure-gateway               # Optional: dedicated secure gateway
+  tags:
+    - payments
+    - financial
+    - secure
+  apiDescription: Secure payment processing and transaction management API
+  apiType: http
+  policies:
+    inbound:
+      - type: rate-limit              # Strict rate limiting for financial APIs
+        calls: 100
+        renewal-period: 3600
+      - type: validate-jwt            # JWT token validation
+        header-name: Authorization
+        failed-validation-httpcode: 401
+        require-expiration-time: true
+        require-signed-tokens: true
+
+# Example 6: External Third-Party Integration (OpenAPI/REST)
+- apiId: weather-external-api
+  displayName: Weather Service API
+  path: weather
+  specPath: ./specs/weather-openapi.yaml
+  format: openapi
+  serviceUrl: https://api.openweathermap.org
+  protocols:
+    - https
+  subscriptionRequired: false          # Public API, no subscription needed
+  productIds:
+    - starter
+    - unlimited
+  gatewayNames:
+    - managed
+  tags:
+    - weather
+    - external
+    - public
+  apiDescription: External weather data service integration
+  apiType: http
+
+# Example 7: Internal Microservice (OpenAPI/REST)
+- apiId: notifications-api
+  displayName: Notifications API
+  path: notifications
+  specPath: ./specs/notifications-openapi.json
+  format: openapi+json
+  serviceUrl: ${NOTIFICATIONS_API_URL}
+  protocols:
+    - https
+  subscriptionRequired: true
+  productIds:
+    - unlimited
+  gatewayNames:
+    - managed
+  tags:
+    - notifications
+    - messaging
+    - internal
+  apiDescription: Internal notification and messaging service API
+  apiType: http
+
+# Example 8: SOAP/WSDL API (Legacy Integration)
+- apiId: legacy-accounting-api
+  displayName: Legacy Accounting SOAP API
+  path: accounting
+  specPath: ./specs/accounting-service.wsdl  # WSDL specification file
+  format: wsdl                         # WSDL format for SOAP APIs
+  serviceUrl: ${LEGACY_ACCOUNTING_URL}/soap/v1
+  protocols:
+    - https
+  subscriptionRequired: true
+  productIds:
+    - unlimited
+  gatewayNames:
+    - managed
+  tags:
+    - accounting
+    - legacy
+    - soap
+    - financial
+  apiDescription: Legacy SOAP-based accounting system integration
+  apiType: soap                        # API type for SOAP services
+
+# Example 9: Another WSDL API with XML Specification
+- apiId: inventory-soap-api
+  displayName: Inventory SOAP Service
+  path: inventory-soap
+  specPath: ./specs/inventory-service.xml    # XML/WSDL specification
+  format: wsdl-link                    # Alternative WSDL format
+  serviceUrl: ${INVENTORY_SOAP_URL}
+  protocols:
+    - https
+  subscriptionRequired: true
+  productIds:
+    - unlimited
+  gatewayNames:
+    - managed
+  tags:
+    - inventory
+    - soap
+    - enterprise
+  apiDescription: Enterprise inventory management via SOAP web services
+  apiType: soap
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Configuration Field Reference
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# Required Fields:
+# - apiId: Unique identifier (alphanumeric, hyphens, underscores only)
+# - displayName: Human-readable name for the API
+# - path: URL path segment (will be prefixed with APIM gateway URL)
+# - specPath: Path to API specification file (OpenAPI JSON/YAML or WSDL/XML)
+#
+# Optional Fields:
+# - format: Specification format (default: openapi+json)
+#   - OpenAPI: openapi+json, openapi, swagger-json, swagger-yaml
+#   - WSDL: wsdl, wsdl-link
+# - serviceUrl: Backend service URL (supports environment variables)
+# - protocols: Array of supported protocols (default: [https])
+# - subscriptionRequired: Whether subscription key is required (default: false)
+# - productIds: Array of product IDs to associate with API (default: [unlimited])
+# - gatewayNames: Array of gateway names (default: [managed])
+# - tags: Array of tags for categorization
+# - apiDescription: Detailed description of the API
+# - apiType: Type of API (http, soap, websocket, graphql) (default: http)
+# - policies: Advanced APIM policies (inbound, outbound, backend, on-error)
+#
+# Environment Variables:
+# - Use ${VARIABLE_NAME} syntax for dynamic values
+# - Variables are substituted during deployment
+# - Common variables: API URLs, authentication tokens, configuration values
+#
+# File Formats Supported:
+# - JSON: .json files (OpenAPI/Swagger specifications)
+# - YAML: .yaml, .yml files (OpenAPI specifications with comments)
+# - WSDL: .wsdl, .xml files (SOAP web service descriptions)
+# ──────────────────────────────────────────────────────────────────────────────
