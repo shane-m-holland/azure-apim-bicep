@@ -251,19 +251,19 @@ VNET_NAME=$(read_input "Virtual Network name" "${APIM_NAME}-vnet")
 case "$ENVIRONMENT" in
     dev|development)
         DEFAULT_VNET_CIDR="10.1.0.0/16"
-        DEFAULT_SUBNET_CIDR="10.1.1.0/24"
+        DEFAULT_SUBNET_CIDR="10.1.0.0/24"
         ;;
     staging|stage)
         DEFAULT_VNET_CIDR="10.2.0.0/16"
-        DEFAULT_SUBNET_CIDR="10.2.1.0/24"
+        DEFAULT_SUBNET_CIDR="10.2.0.0/24"
         ;;
     prod|production)
         DEFAULT_VNET_CIDR="10.3.0.0/16"
-        DEFAULT_SUBNET_CIDR="10.3.1.0/24"
+        DEFAULT_SUBNET_CIDR="10.3.0.0/24"
         ;;
     *)
         DEFAULT_VNET_CIDR="10.0.0.0/16"
-        DEFAULT_SUBNET_CIDR="10.0.1.0/24"
+        DEFAULT_SUBNET_CIDR="10.0.0.0/24"
         ;;
 esac
 

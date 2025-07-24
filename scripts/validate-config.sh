@@ -88,7 +88,7 @@ validate_wsdl_spec() {
             pass "WSDL file has valid XML syntax"
             
             # Check for WSDL-specific elements
-            if grep -q "definitions.*xmlns.*wsdl" "$spec_path" && grep -qE "<(wsdl:|tns:)?(service|binding|portType)[ >]" "$spec_path"; then
+            if grep -q "<definitions.*" "$spec_path" && grep -q "xmlns.*wsdl" "$spec_path" && grep -qE "<(wsdl:|tns:)?(service|binding|portType)[ >]" "$spec_path"; then
                 pass "WSDL file contains required WSDL elements"
             else
                 warn "File appears to be XML but may not be a valid WSDL (missing WSDL namespace or elements)"
@@ -262,7 +262,7 @@ validate_project_structure() {
     done
     
     # Check scripts are executable
-    local scripts=("scripts/deploy-infrastructure.sh" "scripts/destroy-infrastructure.sh" "scripts/deploy-apis.sh" "scripts/delete-apis.sh")
+    local scripts=("scripts/deploy-infrastructure.sh" "scripts/destroy-infrastructure.sh" "scripts/deploy-apis.sh" "scripts/destroy-apis.sh")
     for script in "${scripts[@]}"; do
         if [[ -f "$script" ]]; then
             if [[ -x "$script" ]]; then

@@ -39,6 +39,9 @@ param gatewayNames array = ['managed']
 @description('Array of APIM tag names to associate this API with (for Developer Portal categorization)')
 param tags array = []
 
+@description('The type of endpoint (e.g. soap, http, graphql, websocket etc.)')
+param apiType string = 'http'
+
 
 // -------------------------------------------
 // Import the API with given configuration
@@ -52,6 +55,8 @@ resource api 'Microsoft.ApiManagement/service/apis@2023-03-01-preview' = {
     format: format
     value: loadTextContent('__SPEC_PATH__')
     protocols: protocols
+    type: apiType
+    apiType: apiType
     subscriptionRequired: subscriptionRequired
 
     // Conditionally include the serviceUrl only if provided
