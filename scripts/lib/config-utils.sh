@@ -211,8 +211,8 @@ get_config_array_items() {
             ;;
         "yaml")
             if command -v yq &> /dev/null; then
-                # Convert to JSON format for consistent array processing
-                yq eval -o=json '.[]' "$file_path" 2>/dev/null
+                # Convert to compact JSON format for consistent array processing
+                yq eval -o=json -I=0 '.[]' "$file_path" 2>/dev/null
             else
                 echo "yq is required for YAML array processing" >&2
                 return 1
