@@ -600,7 +600,15 @@ validate_bicep_templates() {
                 # Find a valid spec file from API config for testing
                 local test_spec_path=""
                 if [[ -f "$CONFIG_FILE" ]]; then
-                    test_spec_path=$(jq -r '.[0].specPath // empty' "$CONFIG_FILE" 2>/dev/null)
+                    # Get first API configuration using format-aware function
+                    local first_api_config=$(get_config_array_items "$CONFIG_FILE" | head -n 1 2>/dev/null)
+                    if [[ -n "$first_api_config" ]]; then
+                        test_spec_path=$(echo "$first_api_config" | jq -r '.specPath // empty' 2>/dev/null)
+                    else
+                        echo "    Warning: Could not parse API configuration from $CONFIG_FILE"
+                    fi
+                else
+                    echo "    Warning: API configuration file not found: $CONFIG_FILE"
                 fi
                 
                 if [[ -n "$test_spec_path" && -f "$test_spec_path" ]]; then
