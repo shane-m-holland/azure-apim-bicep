@@ -102,13 +102,6 @@ For production environments, create a custom role with minimal permissions:
                     "Microsoft.ApiManagement/service/diagnostics/*",
                     "Microsoft.ApiManagement/service/operationresults/read",
                     "Microsoft.ApiManagement/service/tenant/*",
-                    
-                    "Microsoft.ApiManagement/service/tenant/write",
-                    "Microsoft.ApiManagement/service/tenant/delete",
-                    "Microsoft.ApiManagement/service/tenant/listSecrets/action",
-                    "Microsoft.ApiManagement/service/tenant/regeneratePrimaryKey/action",
-                    "Microsoft.ApiManagement/service/tenant/regenerateSecondaryKey/action",
-                    "Microsoft.ApiManagement/service/tenant/save/action",
 
                     "Microsoft.Resources/deployments/read",
                     "Microsoft.Resources/deployments/write",
