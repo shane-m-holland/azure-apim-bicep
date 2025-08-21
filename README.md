@@ -74,6 +74,97 @@ This project provides a comprehensive shell script-driven Azure API Management (
 - **Azure Login**: Run `az login` before deployment
 - **Environment Variables**: Set `AZURE_SUBSCRIPTION_ID` for your target subscription
 
+### Required Azure Permissions
+
+The service principal or user account performing the deployment must have the following minimum permissions:
+
+#### Custom Role Definition (Least Privilege)
+
+For production environments, create a custom role with minimal permissions:
+
+```json
+{
+    "properties": {
+        "roleName": "APIM Deployment Role",
+        "description": "Minimal permissions for APIM API deployment via Bicep",
+        "assignableScopes": [
+            "/subscriptions/<subscription-id>"
+        ],
+        "permissions": [
+            {
+                "actions": [
+                    "Microsoft.ApiManagement/service/read",
+                    "Microsoft.ApiManagement/service/write", 
+                    "Microsoft.ApiManagement/service/apis/*",
+                    "Microsoft.ApiManagement/service/products/*",
+                    "Microsoft.ApiManagement/service/tags/*",
+                    "Microsoft.ApiManagement/service/gateways/*",
+                    "Microsoft.ApiManagement/service/diagnostics/*",
+                    "Microsoft.ApiManagement/service/operationresults/read",
+                    "Microsoft.ApiManagement/service/tenant/*",
+                    
+                    "Microsoft.ApiManagement/service/tenant/write",
+                    "Microsoft.ApiManagement/service/tenant/delete",
+                    "Microsoft.ApiManagement/service/tenant/listSecrets/action",
+                    "Microsoft.ApiManagement/service/tenant/regeneratePrimaryKey/action",
+                    "Microsoft.ApiManagement/service/tenant/regenerateSecondaryKey/action",
+                    "Microsoft.ApiManagement/service/tenant/save/action",
+
+                    "Microsoft.Resources/deployments/read",
+                    "Microsoft.Resources/deployments/write",
+                    "Microsoft.Resources/deployments/validate/action",
+                    "Microsoft.Resources/deployments/operations/read",
+                    "Microsoft.Resources/deployments/operationstatuses/read",
+                    
+                    "Microsoft.Resources/subscriptions/resourceGroups/read",
+                    "Microsoft.Resources/subscriptions/resourceGroups/write",
+                    "Microsoft.Resources/subscriptions/resourceGroups/delete",
+
+                    "Microsoft.Authorization/roleDefinitions/read",
+                    "Microsoft.Authorization/roleAssignments/read",
+
+                    "Microsoft.Insights/alertRules/read",
+                    "Microsoft.ResourceHealth/availabilityStatuses/read",
+                    
+                    "Microsoft.Resources/tags/read",
+                    "Microsoft.Resources/tags/write",
+                    "Microsoft.Resources/tags/delete",
+                    
+                    "Microsoft.Network/register/action",
+                    "Microsoft.Network/unregister/action",
+
+                    "Microsoft.Network/virtualNetworks/read",
+                    "Microsoft.Network/virtualNetworks/write",
+                    "Microsoft.Network/virtualNetworks/delete",
+                    "Microsoft.Network/virtualNetworks/join/action",
+
+                    "Microsoft.Network/virtualNetworks/subnets/read",
+                    "Microsoft.Network/virtualNetworks/subnets/write",
+                    "Microsoft.Network/virtualNetworks/subnets/delete",
+                    "Microsoft.Network/virtualNetworks/subnets/join/action",
+                    "Microsoft.Network/virtualNetworks/subnets/joinViaServiceEndpoint/action",
+
+                    "Microsoft.Network/networkSecurityGroups/read",
+                    "Microsoft.Network/networkSecurityGroups/write",
+                    "Microsoft.Network/networkSecurityGroups/delete",
+                    "Microsoft.Network/networkSecurityGroups/join/action",
+                    "Microsoft.Network/networkSecurityGroups/securityRules/read",
+                    "Microsoft.Network/networkSecurityGroups/securityRules/write",
+                    "Microsoft.Network/networkSecurityGroups/securityRules/delete",
+
+                    "Microsoft.Network/locations/operations/read",
+                    "Microsoft.Network/locations/operationResults/read",
+                    "Microsoft.Network/operations/read"
+                ],
+                "notActions": [],
+                "dataActions": [],
+                "notDataActions": []
+            }
+        ]
+    }
+}
+```
+
 ### Initial Setup
 ```bash
 # Clone the repository
