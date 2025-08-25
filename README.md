@@ -363,6 +363,147 @@ All scripts follow a consistent environment-based pattern and include comprehens
 
 ---
 
+## 🔄 Network Resource Reuse Scenarios
+
+The deployment supports flexible network resource usage to enable cost optimization and integration with existing infrastructure. You can mix and match new and existing network resources based on your requirements.
+
+### Configuration Overview
+
+Network resource reuse is configured through environment variables in your `environments/{env}/config.env` file:
+
+```bash
+# Network Security Group (NSG) Strategy
+USE_EXISTING_NSG=false                     # true/false - Reuse existing NSG
+EXISTING_NSG_RESOURCE_GROUP=               # Resource group containing existing NSG
+EXISTING_NSG_RESOURCE_ID=                  # Full resource ID of existing NSG
+
+# Virtual Network (VNet) Strategy  
+USE_EXISTING_VNET=false                    # true/false - Reuse existing VNet
+EXISTING_VNET_RESOURCE_GROUP=              # Resource group containing existing VNet
+EXISTING_VNET_RESOURCE_ID=                 # Full resource ID of existing VNet
+
+# Subnet Strategy (when using existing VNet)
+USE_EXISTING_SUBNET=false                  # true/false - Reuse existing subnet
+CREATE_NEW_SUBNET_IN_EXISTING_VNET=true    # true/false - Create new subnet in existing VNet
+```
+
+### Supported Deployment Scenarios
+
+#### 1. Full New Infrastructure (Default Behavior)
+**Configuration:**
+```bash
+USE_EXISTING_NSG=false
+USE_EXISTING_VNET=false
+# All network resources created fresh
+```
+**Use Cases:**
+- New APIM deployments in isolated environments
+- Development/testing environments
+- Complete infrastructure ownership
+
+#### 2. Shared Network Security Group
+**Configuration:**
+```bash
+USE_EXISTING_NSG=true
+EXISTING_NSG_RESOURCE_ID=/subscriptions/.../providers/Microsoft.Network/networkSecurityGroups/shared-nsg
+USE_EXISTING_VNET=false
+```
+**Use Cases:**
+- Standardized security rules across multiple APIM instances
+- Centralized network security management
+- Compliance with enterprise security policies
+
+#### 3. Reuse VNet + Create New Subnet
+**Configuration:**
+```bash
+USE_EXISTING_VNET=true
+EXISTING_VNET_RESOURCE_ID=/subscriptions/.../providers/Microsoft.Network/virtualNetworks/enterprise-vnet
+USE_EXISTING_SUBNET=false
+CREATE_NEW_SUBNET_IN_EXISTING_VNET=true
+SUBNET_NAME=apim-dev-subnet
+SUBNET_CIDR=10.100.5.0/24
+```
+**Use Cases:**
+- Integration with existing enterprise network infrastructure
+- Shared VNet with isolated APIM subnets
+- Multi-environment deployments in same VNet
+
+#### 4. Full Network Infrastructure Reuse
+**Configuration:**
+```bash
+USE_EXISTING_NSG=true
+USE_EXISTING_VNET=true
+USE_EXISTING_SUBNET=true
+EXISTING_NSG_RESOURCE_ID=/subscriptions/.../networkSecurityGroups/enterprise-nsg
+EXISTING_VNET_RESOURCE_ID=/subscriptions/.../virtualNetworks/enterprise-vnet
+EXISTING_SUBNET_NAME=apim-shared-subnet
+```
+**Use Cases:**
+- Maximum cost optimization through resource sharing
+- Standardized network configuration across environments
+- Integration with pre-existing network architecture
+
+#### 5. Cross-Resource Group Scenarios
+**Configuration:**
+```bash
+USE_EXISTING_NSG=true
+EXISTING_NSG_RESOURCE_GROUP=network-rg
+NSG_NAME=shared-apim-nsg
+USE_EXISTING_VNET=true
+EXISTING_VNET_RESOURCE_GROUP=network-rg
+VNET_NAME=enterprise-vnet
+```
+**Use Cases:**
+- Centralized network resources managed by network team
+- Different resource groups for network vs. application resources
+- Enterprise governance models
+
+### Validation and Prerequisites
+
+#### Pre-deployment Validation
+The validation script checks:
+```bash
+./apim.sh validate dev
+```
+- Existing resources exist and are accessible
+- Resource ID formats are correct
+- Configuration consistency (e.g., can't use existing subnet with new VNet)
+- Azure CLI permissions to access cross-resource group resources
+
+#### Required Permissions
+When using existing resources, ensure your deployment identity has:
+- **Reader** access on existing NSG/VNet/Subnet resources
+- **Network Contributor** if creating new subnets in existing VNets
+- **Contributor** on target resource group for APIM deployment
+
+### Best Practices
+
+#### Cost Optimization
+- **Shared NSG**: Reuse NSGs across multiple APIM instances in same region
+- **Shared VNet**: Use existing enterprise VNets to avoid VNet peering costs
+- **Dedicated Subnets**: Create dedicated subnets per APIM for isolation
+
+#### Security Considerations
+- **NSG Rules**: Existing NSGs must include required APIM rules (management endpoint port 3443)
+- **Subnet Size**: Ensure existing subnets have sufficient IP addresses for APIM scaling
+- **Network Isolation**: Use dedicated subnets even in shared VNets for security isolation
+
+#### Troubleshooting
+```bash
+# Validate existing resources are accessible
+az network nsg show --ids "/subscriptions/.../networkSecurityGroups/my-nsg"
+az network vnet show --ids "/subscriptions/.../virtualNetworks/my-vnet"
+
+# Check subnet availability in existing VNet
+az network vnet subnet list --vnet-name my-vnet --resource-group network-rg
+
+# Validate NSG rules for APIM requirements
+az network nsg rule list --nsg-name my-nsg --resource-group network-rg \
+  --query "[?destinationPortRange=='3443']"
+```
+
+---
+
 ## 🔄 Advanced: Multi-Subscription Deployments
 
 The scripts support automatic subscription switching for scenarios where you manage multiple Azure subscriptions:
@@ -406,6 +547,18 @@ SUBSCRIPTION_ID=your-target-subscription-id
 | `subnetCidr`             | string   | `'10.0.0.0/24'`        | Subnet address prefix |
 | `selfHostedGatewayEnabled` | bool   | `false`                | Set to true to deploy a self-hosted gateway |
 | `selfHostedGatewayName` | string   | `'default'`            | Name of the self-hosted gateway |
+| **Network Resource Reuse Parameters** | | | |
+| `useExistingNsg`         | bool     | `false`                | Use existing NSG instead of creating new |
+| `existingNsgName`        | string   | `''`                   | Name of existing NSG to use |
+| `existingNsgResourceGroup` | string | `''`                   | Resource group containing existing NSG |
+| `existingNsgResourceId`  | string   | `''`                   | Full resource ID of existing NSG |
+| `useExistingVnet`        | bool     | `false`                | Use existing VNet instead of creating new |
+| `existingVnetName`       | string   | `''`                   | Name of existing VNet to use |
+| `existingVnetResourceGroup` | string | `''`                   | Resource group containing existing VNet |
+| `existingVnetResourceId` | string   | `''`                   | Full resource ID of existing VNet |
+| `useExistingSubnet`      | bool     | `false`                | Use existing subnet instead of creating new |
+| `existingSubnetName`     | string   | `''`                   | Name of existing subnet to use |
+| `createNewSubnetInExistingVnet` | bool | `true`            | Create new subnet in existing VNet |
 | `productIds`             | array    | `['starter', 'unlimited']` | List of products to link to APIs |
 | `gatewayNames`           | array    | `['managed']`          | List of gateways to link to APIs |
 

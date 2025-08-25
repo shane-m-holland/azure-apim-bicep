@@ -44,6 +44,43 @@ param subnetName string = 'default'
 param subnetCidr string = '10.0.0.0/24'
 
 // -------------------------------------------
+// 🔄 Network Resource Reuse Strategy
+// -------------------------------------------
+
+@description('Whether to use existing NSG instead of creating new one')
+param useExistingNsg bool = false
+
+@description('Name of existing NSG to use')
+param existingNsgName string = ''
+
+@description('Resource group containing existing NSG')
+param existingNsgResourceGroup string = ''
+
+@description('Full resource ID of existing NSG')
+param existingNsgResourceId string = ''
+
+@description('Whether to use existing VNet instead of creating new one')
+param useExistingVnet bool = false
+
+@description('Name of existing VNet to use')
+param existingVnetName string = ''
+
+@description('Resource group containing existing VNet')
+param existingVnetResourceGroup string = ''
+
+@description('Full resource ID of existing VNet')
+param existingVnetResourceId string = ''
+
+@description('Whether to use existing subnet instead of creating new one')
+param useExistingSubnet bool = false
+
+@description('Name of existing subnet to use')
+param existingSubnetName string = ''
+
+@description('Whether to create new subnet in existing VNet')
+param createNewSubnetInExistingVnet bool = true
+
+// -------------------------------------------
 // 🚦 Gateway Config
 // -------------------------------------------
 
@@ -55,9 +92,28 @@ param selfHostedGatewayName string = 'default'
 
 
 // -------------------------------------------
-// 🧱 Deploy Network Security Group
+// 🔍 Lookup Existing Network Resources
 // -------------------------------------------
-module nsg 'network/nsg.bicep' = {
+module existingResources 'network/existing-resources.bicep' = {
+  name: 'lookup-existing-resources'
+  params: {
+    useExistingNsg: useExistingNsg
+    existingNsgName: existingNsgName
+    existingNsgResourceGroup: existingNsgResourceGroup
+    existingNsgResourceId: existingNsgResourceId
+    useExistingVnet: useExistingVnet
+    existingVnetName: existingVnetName
+    existingVnetResourceGroup: existingVnetResourceGroup
+    existingVnetResourceId: existingVnetResourceId
+    useExistingSubnet: useExistingSubnet
+    existingSubnetName: existingSubnetName
+  }
+}
+
+// -------------------------------------------
+// 🧱 Deploy Network Security Group (Conditional)
+// -------------------------------------------
+module nsg 'network/nsg.bicep' = if (!useExistingNsg) {
   name: 'deploy-nsg'
   params: {
     nsgName: nsgName
@@ -66,17 +122,35 @@ module nsg 'network/nsg.bicep' = {
 }
 
 // -------------------------------------------
-// 🧱 Deploy Virtual Network & Subnet
+// 🧱 Deploy Virtual Network & Subnet (Conditional)
 // -------------------------------------------
-module vnet 'network/vnet.bicep' = {
+module vnet 'network/vnet.bicep' = if (!useExistingVnet) {
   name: 'deploy-vnet'
   params: {
     vnetName: vnetName
     location: location
-    nsgResourceId: nsg.outputs.id
+    nsgResourceId: useExistingNsg ? existingResources.outputs.nsgResourceId : nsg.outputs.id
     vnetCidr: vnetCidr
     subnetName: subnetName
     subnetCidr: subnetCidr
+    createFullVnet: true
+  }
+}
+
+// -------------------------------------------
+// 🧱 Deploy New Subnet in Existing VNet (Conditional)
+// -------------------------------------------
+module newSubnetInExistingVnet 'network/vnet.bicep' = if (useExistingVnet && !useExistingSubnet && createNewSubnetInExistingVnet) {
+  name: 'deploy-new-subnet'
+  params: {
+    vnetName: useExistingVnet ? existingVnetName : vnetName
+    location: location
+    nsgResourceId: useExistingNsg ? existingResources.outputs.nsgResourceId : nsg.outputs.id
+    vnetCidr: vnetCidr
+    subnetName: subnetName
+    subnetCidr: subnetCidr
+    createFullVnet: false
+    existingVnetResourceId: existingResources.outputs.vnetResourceId
   }
 }
 
@@ -92,9 +166,15 @@ module apimService './apim/apim-service.bicep' = {
     skuCapacity: skuCapacity
     publisherEmail: publisherEmail
     publisherName: publisherName
-    vnetResourceId: vnet.outputs.id
-    subnetName: subnetName
+    vnetResourceId: useExistingVnet 
+      ? existingResources.outputs.vnetResourceId
+      : vnet.outputs.id
+    subnetName: useExistingSubnet ? existingSubnetName : subnetName
   }
+  dependsOn: [
+    // Ensure network resources are ready before APIM deployment
+    existingResources
+  ]
 }
 
 // -------------------------------------------
