@@ -271,6 +271,136 @@ VNET_CIDR=$(read_input "VNET CIDR block" "$DEFAULT_VNET_CIDR" "^[0-9]{1,3}\\.[0-
 SUBNET_NAME=$(read_input "Subnet name" "apim-subnet")
 SUBNET_CIDR=$(read_input "Subnet CIDR block" "$DEFAULT_SUBNET_CIDR" "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}/[0-9]{1,2}$")
 
+header "🔄 Network Resource Reuse Strategy"
+
+info "You can reuse existing network resources to save costs and integrate with existing infrastructure."
+info "This is useful for enterprise environments with shared network resources or multiple APIM instances."
+
+# Initialize network reuse variables
+USE_EXISTING_NSG="false"
+EXISTING_NSG_RESOURCE_GROUP=""
+EXISTING_NSG_RESOURCE_ID=""
+USE_EXISTING_VNET="false"
+EXISTING_VNET_RESOURCE_GROUP=""
+EXISTING_VNET_RESOURCE_ID=""
+USE_EXISTING_SUBNET="false"
+CREATE_NEW_SUBNET_IN_EXISTING_VNET="true"
+
+echo ""
+echo -n "Do you want to reuse an existing Network Security Group (NSG)? (y/N): "
+read -r nsg_reuse
+if [[ $nsg_reuse =~ ^[Yy]$ ]]; then
+    USE_EXISTING_NSG="true"
+    info "You can specify the existing NSG by name or by full resource ID."
+    
+    echo -n "Do you have the full resource ID of the NSG? (y/N): "
+    read -r has_nsg_id
+    if [[ $has_nsg_id =~ ^[Yy]$ ]]; then
+        EXISTING_NSG_RESOURCE_ID=$(read_input "NSG Resource ID" "" "^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.Network/networkSecurityGroups/[^/]+$")
+    else
+        info "Current NSG name: $NSG_NAME"
+        echo -n "Use current NSG name or specify different name? (current/different): "
+        read -r nsg_choice
+        if [[ $nsg_choice == "different" ]]; then
+            NSG_NAME=$(read_input "Existing NSG name")
+        fi
+        
+        echo -n "Is the NSG in a different resource group? (y/N): "
+        read -r different_nsg_rg
+        if [[ $different_nsg_rg =~ ^[Yy]$ ]]; then
+            EXISTING_NSG_RESOURCE_GROUP=$(read_input "NSG Resource Group")
+        fi
+    fi
+    success "Will reuse existing NSG: ${EXISTING_NSG_RESOURCE_ID:-$NSG_NAME}"
+fi
+
+echo ""
+echo -n "Do you want to reuse an existing Virtual Network (VNet)? (y/N): "
+read -r vnet_reuse
+if [[ $vnet_reuse =~ ^[Yy]$ ]]; then
+    USE_EXISTING_VNET="true"
+    info "You can specify the existing VNet by name or by full resource ID."
+    
+    echo -n "Do you have the full resource ID of the VNet? (y/N): "
+    read -r has_vnet_id
+    if [[ $has_vnet_id =~ ^[Yy]$ ]]; then
+        EXISTING_VNET_RESOURCE_ID=$(read_input "VNet Resource ID" "" "^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\\.Network/virtualNetworks/[^/]+$")
+    else
+        info "Current VNet name: $VNET_NAME"
+        echo -n "Use current VNet name or specify different name? (current/different): "
+        read -r vnet_choice
+        if [[ $vnet_choice == "different" ]]; then
+            VNET_NAME=$(read_input "Existing VNet name")
+        fi
+        
+        echo -n "Is the VNet in a different resource group? (y/N): "
+        read -r different_vnet_rg
+        if [[ $different_vnet_rg =~ ^[Yy]$ ]]; then
+            EXISTING_VNET_RESOURCE_GROUP=$(read_input "VNet Resource Group")
+        fi
+    fi
+    
+    success "Will reuse existing VNet: ${EXISTING_VNET_RESOURCE_ID:-$VNET_NAME}"
+    
+    # Subnet configuration when using existing VNet
+    echo ""
+    info "Since you're using an existing VNet, choose your subnet strategy:"
+    echo "  1. Use existing subnet in the VNet"
+    echo "  2. Create new subnet in the existing VNet"
+    
+    echo -n "Do you want to use an existing subnet? (y/N): "
+    read -r subnet_reuse
+    if [[ $subnet_reuse =~ ^[Yy]$ ]]; then
+        USE_EXISTING_SUBNET="true"
+        CREATE_NEW_SUBNET_IN_EXISTING_VNET="false"
+        
+        info "Current subnet name: $SUBNET_NAME"
+        echo -n "Use current subnet name or specify different name? (current/different): "
+        read -r subnet_choice
+        if [[ $subnet_choice == "different" ]]; then
+            SUBNET_NAME=$(read_input "Existing subnet name")
+        fi
+        success "Will reuse existing subnet: $SUBNET_NAME"
+    else
+        USE_EXISTING_SUBNET="false"
+        CREATE_NEW_SUBNET_IN_EXISTING_VNET="true"
+        info "Current subnet configuration: $SUBNET_NAME ($SUBNET_CIDR)"
+        echo -n "Keep current subnet configuration? (Y/n): "
+        read -r keep_subnet
+        if [[ $keep_subnet =~ ^[Nn]$ ]]; then
+            SUBNET_NAME=$(read_input "New subnet name" "apim-subnet")
+            SUBNET_CIDR=$(read_input "New subnet CIDR block" "$DEFAULT_SUBNET_CIDR" "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}/[0-9]{1,2}$")
+        fi
+        success "Will create new subnet: $SUBNET_NAME ($SUBNET_CIDR) in existing VNet"
+    fi
+else
+    success "Will create new VNet with subnet"
+fi
+
+# Validate configuration consistency
+if [[ "$USE_EXISTING_VNET" == "false" && "$USE_EXISTING_SUBNET" == "true" ]]; then
+    error "Configuration error: Cannot use existing subnet when creating new VNet"
+    error "Please restart the setup and choose consistent options"
+    exit 1
+fi
+
+echo ""
+if [[ "$USE_EXISTING_NSG" == "true" || "$USE_EXISTING_VNET" == "true" ]]; then
+    info "Network Resource Reuse Summary:"
+    [[ "$USE_EXISTING_NSG" == "true" ]] && echo "  ✓ NSG: Reusing existing (${EXISTING_NSG_RESOURCE_ID:-$NSG_NAME})"
+    [[ "$USE_EXISTING_NSG" == "false" ]] && echo "  → NSG: Creating new ($NSG_NAME)"
+    [[ "$USE_EXISTING_VNET" == "true" ]] && echo "  ✓ VNet: Reusing existing (${EXISTING_VNET_RESOURCE_ID:-$VNET_NAME})"
+    [[ "$USE_EXISTING_VNET" == "false" ]] && echo "  → VNet: Creating new ($VNET_NAME)"
+    if [[ "$USE_EXISTING_VNET" == "true" ]]; then
+        [[ "$USE_EXISTING_SUBNET" == "true" ]] && echo "  ✓ Subnet: Reusing existing ($SUBNET_NAME)"
+        [[ "$USE_EXISTING_SUBNET" == "false" ]] && echo "  → Subnet: Creating new ($SUBNET_NAME)"
+    else
+        echo "  → Subnet: Creating new ($SUBNET_NAME)"
+    fi
+else
+    info "Will create all new network resources (default behavior)"
+fi
+
 header "🚪 Gateway Configuration"
 
 info "Self-hosted gateways allow you to deploy APIM gateways in on-premises or other cloud environments."
@@ -367,6 +497,16 @@ VNET_NAME="$VNET_NAME"
 VNET_CIDR="$VNET_CIDR"
 SUBNET_NAME="$SUBNET_NAME"
 SUBNET_CIDR="$SUBNET_CIDR"
+
+# Network Resource Reuse Strategy
+USE_EXISTING_NSG=$USE_EXISTING_NSG
+EXISTING_NSG_RESOURCE_GROUP="$EXISTING_NSG_RESOURCE_GROUP"
+EXISTING_NSG_RESOURCE_ID="$EXISTING_NSG_RESOURCE_ID"
+USE_EXISTING_VNET=$USE_EXISTING_VNET
+EXISTING_VNET_RESOURCE_GROUP="$EXISTING_VNET_RESOURCE_GROUP"
+EXISTING_VNET_RESOURCE_ID="$EXISTING_VNET_RESOURCE_ID"
+USE_EXISTING_SUBNET=$USE_EXISTING_SUBNET
+CREATE_NEW_SUBNET_IN_EXISTING_VNET=$CREATE_NEW_SUBNET_IN_EXISTING_VNET
 
 # Gateway Configuration
 SELF_HOSTED_GATEWAY_ENABLED=$SELF_HOSTED_GATEWAY_ENABLED

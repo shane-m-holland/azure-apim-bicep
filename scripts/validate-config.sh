@@ -290,6 +290,112 @@ validate_project_structure() {
     done
 }
 
+validate_network_reuse_config() {
+    log "Validating network resource reuse configuration"
+    
+    # Check USE_EXISTING_NSG configuration
+    if [[ "${USE_EXISTING_NSG:-false}" == "true" ]]; then
+        pass "Network resource reuse enabled for NSG"
+        
+        # Validate NSG name or resource ID is provided
+        if [[ -n "${EXISTING_NSG_RESOURCE_ID:-}" ]]; then
+            pass "Existing NSG resource ID provided: ${EXISTING_NSG_RESOURCE_ID}"
+            
+            # Validate resource ID format
+            if [[ "$EXISTING_NSG_RESOURCE_ID" =~ ^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Network/networkSecurityGroups/[^/]+$ ]]; then
+                pass "NSG resource ID format is valid"
+            else
+                fail "Invalid NSG resource ID format: $EXISTING_NSG_RESOURCE_ID"
+            fi
+        elif [[ -n "${NSG_NAME:-}" ]]; then
+            pass "NSG name provided for lookup: ${NSG_NAME}"
+            if [[ -n "${EXISTING_NSG_RESOURCE_GROUP:-}" ]]; then
+                pass "NSG resource group specified: ${EXISTING_NSG_RESOURCE_GROUP}"
+            else
+                pass "NSG will be looked up in current resource group: ${RESOURCE_GROUP:-<not_set>}"
+            fi
+        else
+            fail "USE_EXISTING_NSG=true but no NSG name or resource ID provided"
+        fi
+        
+        # Check if Azure CLI can validate the resource exists
+        if command -v az &> /dev/null && [[ -n "${EXISTING_NSG_RESOURCE_ID:-}" ]]; then
+            if az network nsg show --ids "$EXISTING_NSG_RESOURCE_ID" &>/dev/null; then
+                pass "Existing NSG resource validated successfully"
+            else
+                warn "Could not validate existing NSG resource (check Azure CLI login and permissions)"
+            fi
+        fi
+    else
+        pass "NSG will be created as part of deployment"
+    fi
+    
+    # Check USE_EXISTING_VNET configuration
+    if [[ "${USE_EXISTING_VNET:-false}" == "true" ]]; then
+        pass "Network resource reuse enabled for VNet"
+        
+        # Validate VNet name or resource ID is provided
+        if [[ -n "${EXISTING_VNET_RESOURCE_ID:-}" ]]; then
+            pass "Existing VNet resource ID provided: ${EXISTING_VNET_RESOURCE_ID}"
+            
+            # Validate resource ID format
+            if [[ "$EXISTING_VNET_RESOURCE_ID" =~ ^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Network/virtualNetworks/[^/]+$ ]]; then
+                pass "VNet resource ID format is valid"
+            else
+                fail "Invalid VNet resource ID format: $EXISTING_VNET_RESOURCE_ID"
+            fi
+        elif [[ -n "${VNET_NAME:-}" ]]; then
+            pass "VNet name provided for lookup: ${VNET_NAME}"
+            if [[ -n "${EXISTING_VNET_RESOURCE_GROUP:-}" ]]; then
+                pass "VNet resource group specified: ${EXISTING_VNET_RESOURCE_GROUP}"
+            else
+                pass "VNet will be looked up in current resource group: ${RESOURCE_GROUP:-<not_set>}"
+            fi
+        else
+            fail "USE_EXISTING_VNET=true but no VNet name or resource ID provided"
+        fi
+        
+        # Check subnet configuration when using existing VNet
+        if [[ "${USE_EXISTING_SUBNET:-false}" == "true" ]]; then
+            pass "Will reuse existing subnet in VNet"
+            if [[ -n "${SUBNET_NAME:-}" ]]; then
+                pass "Existing subnet name provided: ${SUBNET_NAME}"
+            else
+                fail "USE_EXISTING_SUBNET=true but no subnet name provided"
+            fi
+        elif [[ "${CREATE_NEW_SUBNET_IN_EXISTING_VNET:-true}" == "true" ]]; then
+            pass "Will create new subnet in existing VNet"
+            if [[ -n "${SUBNET_NAME:-}" && -n "${SUBNET_CIDR:-}" ]]; then
+                pass "New subnet configuration provided: ${SUBNET_NAME} (${SUBNET_CIDR})"
+            else
+                fail "CREATE_NEW_SUBNET_IN_EXISTING_VNET=true but subnet name or CIDR not provided"
+            fi
+        else
+            warn "Using existing VNet but neither USE_EXISTING_SUBNET nor CREATE_NEW_SUBNET_IN_EXISTING_VNET is enabled"
+        fi
+        
+        # Check if Azure CLI can validate the VNet exists
+        if command -v az &> /dev/null && [[ -n "${EXISTING_VNET_RESOURCE_ID:-}" ]]; then
+            if az network vnet show --ids "$EXISTING_VNET_RESOURCE_ID" &>/dev/null; then
+                pass "Existing VNet resource validated successfully"
+            else
+                warn "Could not validate existing VNet resource (check Azure CLI login and permissions)"
+            fi
+        fi
+    else
+        pass "VNet will be created as part of deployment"
+    fi
+    
+    # Validate configuration consistency
+    if [[ "${USE_EXISTING_VNET:-false}" == "false" && "${USE_EXISTING_SUBNET:-false}" == "true" ]]; then
+        fail "Configuration error: Cannot use existing subnet when creating new VNet"
+    fi
+    
+    if [[ "${USE_EXISTING_VNET:-false}" == "false" && "${CREATE_NEW_SUBNET_IN_EXISTING_VNET:-true}" == "false" ]]; then
+        warn "Creating new VNet but CREATE_NEW_SUBNET_IN_EXISTING_VNET is disabled (may be intentional)"
+    fi
+}
+
 validate_environment_config() {
     local env="$1"
     local config_file="./environments/${env}/config.env"
@@ -322,6 +428,9 @@ validate_environment_config() {
             fail "Required variable missing or empty: $var"
         fi
     done
+    
+    # Validate network reuse configuration
+    validate_network_reuse_config
     
     # Validate specific values
     if [[ -n "${PUBLISHER_EMAIL:-}" ]]; then

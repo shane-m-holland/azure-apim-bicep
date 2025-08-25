@@ -38,20 +38,22 @@ warning() {
 }
 
 usage() {
-    echo "Usage: $0 <environment> [--force] [--keep-rg] [--purge]"
+    echo "Usage: $0 <environment> [--force] [--keep-rg] [--purge] [--delete-shared]"
     echo ""
     echo "Arguments:"
     echo "  environment    Environment to destroy (dev, staging, prod)"
     echo ""
     echo "Options:"
-    echo "  --force       Skip confirmation prompts"
-    echo "  --keep-rg     Keep the resource group after destroying APIM"
-    echo "  --purge       Force hard delete and purge soft-deleted APIM instances"
+    echo "  --force         Skip confirmation prompts"
+    echo "  --keep-rg       Keep the resource group after destroying APIM"
+    echo "  --purge         Force hard delete and purge soft-deleted APIM instances"
+    echo "  --delete-shared Override protection and delete shared resources (dangerous)"
     echo ""
     echo "Examples:"
     echo "  $0 dev"
     echo "  $0 prod --force --keep-rg"
     echo "  $0 dev --purge          # Hard delete with immediate name reuse"
+    echo "  $0 dev --delete-shared  # Delete shared network resources (dangerous)"
     exit 1
 }
 
@@ -116,6 +118,55 @@ purge_soft_deleted_apim() {
     fi
 }
 
+check_resource_ownership() {
+    local config_file="$1"
+    
+    log "Analyzing resource ownership from configuration..."
+    
+    # Load network reuse configuration
+    USE_EXISTING_NSG="${USE_EXISTING_NSG:-false}"
+    USE_EXISTING_VNET="${USE_EXISTING_VNET:-false}"
+    USE_EXISTING_SUBNET="${USE_EXISTING_SUBNET:-false}"
+    
+    # Determine resource ownership
+    OWNS_NSG=true
+    OWNS_VNET=true
+    OWNS_SUBNET=true
+    SHARED_RESOURCES=()
+    
+    if [[ "$USE_EXISTING_NSG" == "true" ]]; then
+        OWNS_NSG=false
+        SHARED_RESOURCES+=("NSG: ${NSG_NAME:-<not_set>}")
+    fi
+    
+    if [[ "$USE_EXISTING_VNET" == "true" ]]; then
+        OWNS_VNET=false
+        SHARED_RESOURCES+=("VNet: ${VNET_NAME:-<not_set>}")
+    fi
+    
+    if [[ "$USE_EXISTING_SUBNET" == "true" ]]; then
+        OWNS_SUBNET=false
+        SHARED_RESOURCES+=("Subnet: ${SUBNET_NAME:-<not_set>}")
+    fi
+    
+    # Report findings
+    if [[ ${#SHARED_RESOURCES[@]} -gt 0 ]]; then
+        warning "⚠️  SHARED INFRASTRUCTURE DETECTED"
+        echo ""
+        echo "This deployment uses existing network resources that should be preserved:"
+        for resource in "${SHARED_RESOURCES[@]}"; do
+            echo "  🔒 $resource (shared - will be preserved)"
+        done
+        echo ""
+        echo "Only the APIM instance and owned resources will be deleted."
+        echo ""
+        return 0  # Shared resources found
+    else
+        log "✓ No shared network resources detected - safe to delete entire resource group"
+        return 1  # No shared resources
+    fi
+}
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Argument Processing
 # ──────────────────────────────────────────────────────────────────────────────
@@ -129,6 +180,7 @@ ENVIRONMENT="$1"
 FORCE=false
 KEEP_RG=false
 PURGE=false
+DELETE_SHARED=false
 
 shift
 while [[ $# -gt 0 ]]; do
@@ -143,6 +195,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --purge)
             PURGE=true
+            shift
+            ;;
+        --delete-shared)
+            DELETE_SHARED=true
             shift
             ;;
         *)
@@ -200,6 +256,24 @@ fi
 purge_soft_deleted_apim "$APIM_NAME" "$LOCATION"
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Resource Ownership Analysis
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Check what resources this deployment owns vs. shares
+if check_resource_ownership "$CONFIG_FILE"; then
+    HAS_SHARED_RESOURCES=true
+    
+    if [[ "$DELETE_SHARED" == "true" ]]; then
+        warning "🚨 OVERRIDE: --delete-shared flag specified"
+        warning "This will delete shared network resources that may be used by other deployments!"
+        warning "This could cause outages for other services using these resources!"
+        HAS_SHARED_RESOURCES=false  # Override protection
+    fi
+else
+    HAS_SHARED_RESOURCES=false
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Pre-destruction Checks
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -251,7 +325,15 @@ if [[ "$API_COUNT" -gt 0 ]]; then
     confirm_action "⚠️  This APIM instance has $API_COUNT APIs deployed. All APIs will be deleted along with the infrastructure. Continue?"
 fi
 
-confirm_action "🚨 WARNING: This will permanently delete the APIM infrastructure in environment '$ENVIRONMENT'. This action cannot be undone. Continue?"
+if [[ "$HAS_SHARED_RESOURCES" == "true" ]]; then
+    confirm_action "🔒 SHARED INFRASTRUCTURE: Only the APIM instance will be deleted. Shared network resources will be preserved. Continue?"
+else
+    if [[ "$DELETE_SHARED" == "true" ]]; then
+        confirm_action "🚨 DANGER: This will delete shared network resources that may affect other deployments! This action cannot be undone. Continue?"
+    else
+        confirm_action "🚨 WARNING: This will permanently delete the APIM infrastructure in environment '$ENVIRONMENT'. This action cannot be undone. Continue?"
+    fi
+fi
 
 # ──────────────────────────────────────────────────────────────────────────────
 # API Cleanup (Optional)
@@ -273,14 +355,23 @@ fi
 # Infrastructure Destruction
 # ──────────────────────────────────────────────────────────────────────────────
 
-if [[ "$KEEP_RG" == "true" ]] || [[ "$PURGE" == "true" ]]; then
-    # Use direct APIM deletion for --keep-rg or --purge (avoids soft-delete)
-    log "Deleting APIM instance: $APIM_NAME"
-    if [[ "$PURGE" == "true" ]]; then
+if [[ "$HAS_SHARED_RESOURCES" == "true" ]] || [[ "$KEEP_RG" == "true" ]] || [[ "$PURGE" == "true" ]]; then
+    # Use selective deletion for shared resources, --keep-rg, or --purge modes
+    log "Deleting APIM instance only: $APIM_NAME"
+    
+    if [[ "$HAS_SHARED_RESOURCES" == "true" ]]; then
+        log "Preserving shared network resources"
+    elif [[ "$PURGE" == "true" ]]; then
         warning "Using hard delete to prevent soft-delete behavior"
     fi
+    
     az apim delete --name "$APIM_NAME" --resource-group "$RESOURCE_GROUP" --yes --no-wait
-    success "APIM deletion initiated (keeping resource group)"
+    
+    if [[ "$HAS_SHARED_RESOURCES" == "true" ]]; then
+        success "APIM deletion initiated (preserving shared network resources)"
+    else
+        success "APIM deletion initiated (keeping resource group)"
+    fi
     
     log "Monitoring deletion progress..."
     while az apim show --name "$APIM_NAME" --resource-group "$RESOURCE_GROUP" >/dev/null 2>&1; do
@@ -290,7 +381,31 @@ if [[ "$KEEP_RG" == "true" ]] || [[ "$PURGE" == "true" ]]; then
     echo ""
     success "APIM instance deleted successfully"
     
+    # If we have shared resources but aren't keeping the RG, clean up owned resources
+    if [[ "$HAS_SHARED_RESOURCES" == "true" && "$KEEP_RG" == "false" ]]; then
+        log "Cleaning up owned network resources..."
+        
+        # Delete created subnet if we created it in existing VNet
+        if [[ "$OWNS_SUBNET" == "true" && "$USE_EXISTING_VNET" == "true" ]]; then
+            log "Deleting created subnet: $SUBNET_NAME"
+            az network vnet subnet delete --name "$SUBNET_NAME" --vnet-name "$VNET_NAME" --resource-group "$RESOURCE_GROUP" || warning "Failed to delete subnet"
+        fi
+        
+        # Delete created VNet if we own it
+        if [[ "$OWNS_VNET" == "true" ]]; then
+            log "Deleting created VNet: $VNET_NAME"
+            az network vnet delete --name "$VNET_NAME" --resource-group "$RESOURCE_GROUP" || warning "Failed to delete VNet"
+        fi
+        
+        # Delete created NSG if we own it
+        if [[ "$OWNS_NSG" == "true" ]]; then
+            log "Deleting created NSG: $NSG_NAME"
+            az network nsg delete --name "$NSG_NAME" --resource-group "$RESOURCE_GROUP" || warning "Failed to delete NSG"
+        fi
+    fi
+    
 else
+    # Full resource group deletion (traditional behavior)
     log "Deleting entire resource group: $RESOURCE_GROUP"
     az group delete --name "$RESOURCE_GROUP" --yes --no-wait
     success "Resource group deletion initiated"
@@ -321,7 +436,18 @@ fi
 echo ""
 echo "🗑️  Infrastructure destruction completed for environment: $ENVIRONMENT"
 echo ""
-if [[ "$KEEP_RG" == "true" ]] || [[ "$PURGE" == "true" ]]; then
+
+if [[ "$HAS_SHARED_RESOURCES" == "true" ]]; then
+    echo "✅ Shared Infrastructure Mode:"
+    echo "   - APIM instance '$APIM_NAME' has been deleted"
+    echo "   - Shared network resources were preserved:"
+    for resource in "${SHARED_RESOURCES[@]}"; do
+        echo "     🔒 $resource"
+    done
+    if [[ "$KEEP_RG" == "false" ]]; then
+        echo "   - Owned network resources were cleaned up"
+    fi
+elif [[ "$KEEP_RG" == "true" ]] || [[ "$PURGE" == "true" ]]; then
     echo "Note: Resource group '$RESOURCE_GROUP' was preserved"
     if [[ "$PURGE" == "true" ]]; then
         echo "      Hard delete was used to prevent soft-delete behavior"
