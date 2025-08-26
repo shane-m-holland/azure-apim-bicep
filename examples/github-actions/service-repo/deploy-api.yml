@@ -1,0 +1,241 @@
+# Example GitHub Actions Workflow for Service Repository
+# Copy this file to your service repository at: .github/workflows/deploy-api.yml
+
+name: Deploy API to APIM
+
+on:
+  # Automatic deployment on merges
+  push:
+    branches:
+      - develop      # Deploy to dev environment
+      - main         # Deploy to prod environment
+    paths:
+      - 'src/**'
+      - 'specs/**'
+      - 'deployment/**'
+      
+  # Manual deployment with environment selection
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      deployment_mode:
+        description: 'Deployment mode'
+        type: choice
+        options:
+          - sync    # Deploy only changed APIs (recommended)
+          - deploy  # Deploy all APIs
+        default: sync
+      dry_run:
+        description: 'Perform dry run only'
+        type: boolean
+        default: false
+
+# Prevent concurrent deployments to the same environment
+concurrency:
+  group: deploy-api-${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'prod' || 'dev') }}
+  cancel-in-progress: false
+
+env:
+  SERVICE_NAME: user-service  # Change this to your service name
+  API_CONFIG_PATH: deployment/api-config.yml
+  API_SPEC_PATH: specs/api.openapi.yml
+
+jobs:
+  # Determine target environment based on branch or manual input
+  determine-environment:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      should_deploy: ${{ steps.env.outputs.should_deploy }}
+    steps:
+    - id: env
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "environment=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+          echo "environment=dev" >> $GITHUB_OUTPUT
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          echo "environment=prod" >> $GITHUB_OUTPUT
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+        else
+          echo "should_deploy=false" >> $GITHUB_OUTPUT
+        fi
+        
+  # Build and test the service (customize as needed)
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup build environment
+      run: |
+        # Add your build setup here (Node.js, .NET, Java, etc.)
+        # Example for Node.js:
+        # - uses: actions/setup-node@v4
+        #   with:
+        #     node-version: '18'
+        #     cache: 'npm'
+        echo "Setting up build environment..."
+        
+    - name: Install dependencies
+      run: |
+        # Add your dependency installation here
+        # Example for Node.js:
+        # npm ci
+        echo "Installing dependencies..."
+        
+    - name: Run tests
+      run: |
+        # Add your test commands here
+        # Example for Node.js:
+        # npm test
+        echo "Running tests..."
+        
+    - name: Validate API specification
+      run: |
+        # Validate API spec exists and is valid
+        if [[ -f "${{ env.API_SPEC_PATH }}" ]]; then
+          echo "✅ API specification found: ${{ env.API_SPEC_PATH }}"
+          
+          # Basic OpenAPI validation (install swagger-tools or similar)
+          # npx swagger-tools validate ${{ env.API_SPEC_PATH }}
+        else
+          echo "❌ API specification not found: ${{ env.API_SPEC_PATH }}"
+          exit 1
+        fi
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: service-artifacts
+        path: |
+          ${{ env.API_CONFIG_PATH }}
+          ${{ env.API_SPEC_PATH }}
+        retention-days: 7
+        
+  # Validate API configuration
+  validate-api-config:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Validate API Configuration
+      uses: your-org/azure-apim-bicep/.github/workflows/validate-config.yml@v1
+      with:
+        environment: dev  # Use dev for validation
+        api-config-path: ${{ env.API_CONFIG_PATH }}
+        api-spec-path: ${{ env.API_SPEC_PATH }}
+        config-repo: your-org/infra-config-repo
+      secrets:
+        CONFIG_REPO_TOKEN: ${{ secrets.CONFIG_REPO_TOKEN }}
+        
+  # Deploy API to APIM
+  deploy-api:
+    needs: [determine-environment, build-and-test, validate-api-config]
+    if: needs.determine-environment.outputs.should_deploy == 'true'
+    
+    uses: your-org/azure-apim-bicep/.github/workflows/deploy-api.yml@v1
+    with:
+      environment: ${{ needs.determine-environment.outputs.environment }}
+      service-name: ${{ env.SERVICE_NAME }}
+      api-config-path: ${{ env.API_CONFIG_PATH }}
+      api-spec-path: ${{ env.API_SPEC_PATH }}
+      config-repo: your-org/infra-config-repo
+      deployment-mode: ${{ inputs.deployment_mode || 'sync' }}
+      parallel-deployment: true
+      dry-run: ${{ inputs.dry_run || false }}
+      apim-tooling-version: v1  # Pin to specific version
+    secrets:
+      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+      CONFIG_REPO_TOKEN: ${{ secrets.CONFIG_REPO_TOKEN }}
+      
+  # Post-deployment testing (optional)
+  post-deployment-test:
+    needs: [determine-environment, deploy-api]
+    if: needs.deploy-api.result == 'success' && inputs.dry_run != true
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine-environment.outputs.environment }}-testing
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run integration tests
+      run: |
+        # Add your integration tests here
+        # These should test the deployed API in the target environment
+        echo "Running post-deployment integration tests..."
+        
+        # Example: Test API endpoints
+        # APIM_BASE_URL="https://your-apim-instance.azure-api.net"
+        # curl -f "$APIM_BASE_URL/${{ env.SERVICE_NAME }}/health" || exit 1
+        
+    - name: Performance tests (for production)
+      if: needs.determine-environment.outputs.environment == 'prod'
+      run: |
+        # Add performance tests for production deployments
+        echo "Running performance tests..."
+        
+  # Notify deployment result
+  notify:
+    needs: [determine-environment, deploy-api, post-deployment-test]
+    if: always() && needs.determine-environment.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Determine deployment status
+      id: status
+      run: |
+        if [[ "${{ needs.deploy-api.result }}" == "success" ]]; then
+          if [[ "${{ needs.post-deployment-test.result }}" == "success" || "${{ needs.post-deployment-test.result }}" == "skipped" ]]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "message=🎉 API deployment and tests successful" >> $GITHUB_OUTPUT
+          else
+            echo "status=warning" >> $GITHUB_OUTPUT  
+            echo "message=⚠️ API deployed but tests failed" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "message=❌ API deployment failed" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Post to Slack/Teams (customize as needed)
+      run: |
+        echo "${{ steps.status.outputs.message }}"
+        echo "Service: ${{ env.SERVICE_NAME }}"
+        echo "Environment: ${{ needs.determine-environment.outputs.environment }}"
+        echo "Commit: ${{ github.sha }}"
+        
+        # Add your notification logic here
+        # Example Slack webhook:
+        # curl -X POST -H 'Content-type: application/json' \
+        #   --data "{\"text\":\"${{ steps.status.outputs.message }}\nService: ${{ env.SERVICE_NAME }}\nEnvironment: ${{ needs.determine-environment.outputs.environment }}\"}" \
+        #   ${{ secrets.SLACK_WEBHOOK_URL }}
+        
+    - name: Create GitHub deployment status
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const deployment = await github.rest.repos.createDeployment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: context.sha,
+            environment: '${{ needs.determine-environment.outputs.environment }}',
+            description: 'APIM API deployment',
+            auto_merge: false
+          });
+          
+          await github.rest.repos.createDeploymentStatus({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            deployment_id: deployment.data.id,
+            state: '${{ steps.status.outputs.status == 'success' && 'success' || 'failure' }}',
+            description: '${{ steps.status.outputs.message }}',
+            environment_url: 'https://your-apim-instance.azure-api.net/${{ env.SERVICE_NAME }}'
+          });
