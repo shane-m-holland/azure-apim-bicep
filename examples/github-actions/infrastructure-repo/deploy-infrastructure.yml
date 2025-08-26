@@ -1,0 +1,91 @@
+# Example GitHub Actions Workflow for Infrastructure Repository
+# Copy this file to your infrastructure repository at: .github/workflows/deploy-infrastructure.yml
+
+name: Deploy APIM Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      dry_run:
+        description: 'Perform dry run only (validate without deploying)'
+        type: boolean
+        default: false
+      force_deploy:
+        description: 'Force deployment even if no changes detected'
+        type: boolean
+        default: false
+        
+  # Optionally trigger on changes to environment configs
+  # Uncomment if you want automatic deployment on config changes
+  # push:
+  #   paths:
+  #     - 'environments/*/config.env'
+  #     - 'bicep/**'
+  #   branches:
+  #     - main
+
+# Prevent concurrent deployments to the same environment
+concurrency:
+  group: deploy-infrastructure-${{ inputs.environment || 'auto' }}
+  cancel-in-progress: false
+
+jobs:
+  # Validate configuration before deployment
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Validate Infrastructure Configuration
+      uses: your-org/azure-apim-bicep/.github/workflows/validate-config.yml@v1
+      with:
+        environment: ${{ inputs.environment }}
+        config-repo: ${{ github.repository }}
+        validate-azure-resources: true
+      secrets:
+        AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+        
+  # Deploy infrastructure
+  deploy:
+    needs: validate
+    if: always() && (needs.validate.result == 'success' || inputs.force_deploy)
+    uses: your-org/azure-apim-bicep/.github/workflows/deploy-infra.yml@v1
+    with:
+      environment: ${{ inputs.environment }}
+      dry-run: ${{ inputs.dry_run }}
+      config-repo: ${{ github.repository }}
+      apim-tooling-version: v1  # Pin to specific version for stability
+    secrets:
+      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+      CONFIG_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+  # Notify on completion
+  notify:
+    needs: [validate, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - name: Notify deployment result
+      run: |
+        if [[ "${{ needs.deploy.result }}" == "success" ]]; then
+          echo "🎉 Infrastructure deployment successful for environment: ${{ inputs.environment }}"
+          
+          # Add your notification logic here (Slack, Teams, email, etc.)
+          # Example: Post to Slack
+          # curl -X POST -H 'Content-type: application/json' \
+          #   --data '{"text":"APIM Infrastructure deployed successfully to ${{ inputs.environment }}"}' \
+          #   ${{ secrets.SLACK_WEBHOOK_URL }}
+        else
+          echo "❌ Infrastructure deployment failed for environment: ${{ inputs.environment }}"
+          
+          # Add failure notification logic here
+          # curl -X POST -H 'Content-type: application/json' \
+          #   --data '{"text":"🚨 APIM Infrastructure deployment failed for ${{ inputs.environment }}"}' \
+          #   ${{ secrets.SLACK_WEBHOOK_URL }}
+        fi

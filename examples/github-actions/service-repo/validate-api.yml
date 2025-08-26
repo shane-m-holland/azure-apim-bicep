@@ -1,0 +1,255 @@
+# Example GitHub Actions Workflow for Service Repository
+# Copy this file to your service repository at: .github/workflows/validate-api.yml
+
+name: Validate API Configuration
+
+on:
+  # Validate on pull requests to catch issues early
+  pull_request:
+    paths:
+      - 'specs/**'
+      - 'deployment/**'
+      - 'src/**'
+      
+  # Validate on pushes to feature branches
+  push:
+    branches-ignore:
+      - main
+      - develop
+    paths:
+      - 'specs/**'
+      - 'deployment/**'
+      
+  # Allow manual validation
+  workflow_dispatch:
+    inputs:
+      validate_deployment:
+        description: 'Perform deployment validation (dry run)'
+        type: boolean
+        default: true
+
+env:
+  SERVICE_NAME: user-service  # Change this to your service name
+  API_CONFIG_PATH: deployment/api-config.yml
+  API_SPEC_PATH: specs/api.openapi.yml
+
+jobs:
+  # Validate API specification
+  validate-api-spec:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check API specification exists
+      run: |
+        if [[ -f "${{ env.API_SPEC_PATH }}" ]]; then
+          echo "✅ API specification found: ${{ env.API_SPEC_PATH }}"
+        else
+          echo "❌ API specification not found: ${{ env.API_SPEC_PATH }}"
+          echo "Expected API specification at: ${{ env.API_SPEC_PATH }}"
+          echo "Available files:"
+          find . -name "*.openapi.*" -o -name "*.wsdl" -o -name "*.xml" | head -10
+          exit 1
+        fi
+        
+    - name: Validate OpenAPI specification
+      if: endsWith(env.API_SPEC_PATH, '.openapi.yml') || endsWith(env.API_SPEC_PATH, '.openapi.yaml') || endsWith(env.API_SPEC_PATH, '.openapi.json')
+      run: |
+        echo "🔍 Validating OpenAPI specification..."
+        
+        # Install OpenAPI validator (you can customize this based on your preferred tool)
+        npm install -g @apidevtools/swagger-cli
+        
+        # Validate the OpenAPI spec
+        swagger-cli validate "${{ env.API_SPEC_PATH }}"
+        echo "✅ OpenAPI specification is valid"
+        
+    - name: Validate WSDL specification  
+      if: endsWith(env.API_SPEC_PATH, '.wsdl') || endsWith(env.API_SPEC_PATH, '.xml')
+      run: |
+        echo "🔍 Validating WSDL specification..."
+        
+        # Install xmllint for XML validation
+        sudo apt-get update && sudo apt-get install -y libxml2-utils
+        
+        # Validate XML syntax
+        xmllint --noout "${{ env.API_SPEC_PATH }}"
+        
+        # Check for WSDL-specific elements
+        if grep -q "<definitions.*" "${{ env.API_SPEC_PATH }}" && \
+           grep -q "xmlns.*wsdl" "${{ env.API_SPEC_PATH }}" && \
+           grep -qE "<(wsdl:|tns:)?(service|binding|portType)[ >]" "${{ env.API_SPEC_PATH }}"; then
+          echo "✅ WSDL specification appears valid"
+        else
+          echo "❌ File appears to be XML but may not be a valid WSDL"
+          exit 1
+        fi
+        
+    - name: Generate API documentation preview
+      if: github.event_name == 'pull_request'
+      run: |
+        echo "📚 Generating API documentation preview..."
+        
+        # Generate HTML documentation (customize based on your spec format)
+        if [[ "${{ env.API_SPEC_PATH }}" == *.openapi.* ]]; then
+          # Example with Redoc
+          npx redoc-build "${{ env.API_SPEC_PATH }}" --output api-docs.html
+          echo "API documentation generated: api-docs.html"
+        fi
+        
+    - name: Upload API documentation
+      if: github.event_name == 'pull_request'
+      uses: actions/upload-artifact@v4
+      with:
+        name: api-documentation-${{ github.event.pull_request.number }}
+        path: api-docs.html
+        retention-days: 7
+        
+  # Validate API configuration
+  validate-api-config:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check API configuration exists
+      run: |
+        if [[ -f "${{ env.API_CONFIG_PATH }}" ]]; then
+          echo "✅ API configuration found: ${{ env.API_CONFIG_PATH }}"
+        else
+          echo "❌ API configuration not found: ${{ env.API_CONFIG_PATH }}"
+          echo "Available deployment files:"
+          find deployment/ -name "*.yml" -o -name "*.yaml" -o -name "*.json" 2>/dev/null | head -10
+          exit 1
+        fi
+        
+    - name: Validate YAML syntax
+      if: endsWith(env.API_CONFIG_PATH, '.yml') || endsWith(env.API_CONFIG_PATH, '.yaml')
+      run: |
+        # Install yq for YAML validation
+        pip install yq
+        
+        # Validate YAML syntax
+        yq . "${{ env.API_CONFIG_PATH }}" > /dev/null
+        echo "✅ API configuration YAML syntax is valid"
+        
+    - name: Validate JSON syntax
+      if: endsWith(env.API_CONFIG_PATH, '.json')
+      run: |
+        # Validate JSON syntax
+        jq . "${{ env.API_CONFIG_PATH }}" > /dev/null
+        echo "✅ API configuration JSON syntax is valid"
+        
+    - name: Check required fields
+      run: |
+        echo "🔍 Checking required configuration fields..."
+        
+        # Check for required fields in the API config
+        CONFIG_FILE="${{ env.API_CONFIG_PATH }}"
+        MISSING_FIELDS=()
+        
+        # Function to check field in YAML/JSON
+        check_field() {
+          local field="$1"
+          if [[ "$CONFIG_FILE" == *.json ]]; then
+            if ! jq -e ".[0].$field" "$CONFIG_FILE" >/dev/null 2>&1; then
+              MISSING_FIELDS+=("$field")
+            fi
+          else
+            if ! yq -e ".[0].$field" "$CONFIG_FILE" >/dev/null 2>&1; then
+              MISSING_FIELDS+=("$field")
+            fi
+          fi
+        }
+        
+        # Check required fields
+        check_field "apiId"
+        check_field "displayName" 
+        check_field "path"
+        check_field "specPath"
+        
+        if [[ ${#MISSING_FIELDS[@]} -gt 0 ]]; then
+          echo "❌ Missing required fields in API configuration:"
+          for field in "${MISSING_FIELDS[@]}"; do
+            echo "  - $field"
+          done
+          exit 1
+        else
+          echo "✅ All required fields present in API configuration"
+        fi
+        
+  # Validate against APIM deployment (dry run)
+  validate-apim-deployment:
+    needs: [validate-api-spec, validate-api-config]
+    if: inputs.validate_deployment != false
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Validate APIM Deployment (Dry Run)
+      uses: your-org/azure-apim-bicep/.github/workflows/deploy-api.yml@v1
+      with:
+        environment: dev  # Use dev environment for validation
+        service-name: ${{ env.SERVICE_NAME }}
+        api-config-path: ${{ env.API_CONFIG_PATH }}
+        api-spec-path: ${{ env.API_SPEC_PATH }}
+        config-repo: your-org/infra-config-repo
+        deployment-mode: deploy
+        dry-run: true  # Important: Only validate, don't actually deploy
+        apim-tooling-version: v1
+      secrets:
+        AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+        CONFIG_REPO_TOKEN: ${{ secrets.CONFIG_REPO_TOKEN }}
+        
+  # Comment on PR with validation results
+  comment-on-pr:
+    needs: [validate-api-spec, validate-api-config, validate-apim-deployment]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Determine validation status
+      id: status
+      run: |
+        if [[ "${{ needs.validate-api-spec.result }}" == "success" && \
+              "${{ needs.validate-api-config.result }}" == "success" && \
+              ("${{ needs.validate-apim-deployment.result }}" == "success" || "${{ needs.validate-apim-deployment.result }}" == "skipped") ]]; then
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "message=All validations passed! ✅" >> $GITHUB_OUTPUT
+        else
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "message=Some validations failed ❌" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Comment on PR
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const status = '${{ steps.status.outputs.status }}';
+          const message = '${{ steps.status.outputs.message }}';
+          
+          let body = `## 🔍 API Validation Results\n\n${message}\n\n`;
+          body += `### Validation Summary:\n`;
+          body += `- **API Specification**: ${{ needs.validate-api-spec.result == 'success' && '✅ Valid' || '❌ Failed' }}\n`;
+          body += `- **API Configuration**: ${{ needs.validate-api-config.result == 'success' && '✅ Valid' || '❌ Failed' }}\n`;
+          
+          if ('${{ needs.validate-apim-deployment.result }}' !== 'skipped') {
+            body += `- **APIM Deployment**: ${{ needs.validate-apim-deployment.result == 'success' && '✅ Valid' || '❌ Failed' }}\n`;
+          }
+          
+          body += `\n**Service**: ${{ env.SERVICE_NAME }}\n`;
+          body += `**API Spec**: ${{ env.API_SPEC_PATH }}\n`;
+          body += `**Config**: ${{ env.API_CONFIG_PATH }}\n`;
+          
+          if (status === 'success') {
+            body += `\n🚀 **Ready for deployment!** This API configuration will deploy successfully.`;
+          } else {
+            body += `\n🚨 **Issues found!** Please fix the validation errors before merging.`;
+          }
+          
+          body += `\n\n[View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });

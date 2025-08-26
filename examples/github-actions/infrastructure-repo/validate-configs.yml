@@ -1,0 +1,77 @@
+# Example GitHub Actions Workflow for Infrastructure Repository  
+# Copy this file to your infrastructure repository at: .github/workflows/validate-configs.yml
+
+name: Validate Environment Configurations
+
+on:
+  # Validate on pull requests to catch issues early
+  pull_request:
+    paths:
+      - 'environments/**'
+      - '.github/workflows/**'
+      
+  # Validate on pushes to main branch
+  push:
+    branches: [main]
+    paths:
+      - 'environments/**'
+      
+  # Allow manual validation
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Specific environment to validate (leave empty for all)'
+        type: string
+        default: ''
+      validate_azure_resources:
+        description: 'Validate Azure resources accessibility'
+        type: boolean
+        default: false
+
+jobs:
+  validate-configurations:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Determine validation scope
+      id: scope
+      run: |
+        if [[ "${{ inputs.environment }}" != "" ]]; then
+          echo "environment=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+        else
+          echo "environment=all" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Validate Environment Configurations
+      uses: your-org/azure-apim-bicep/.github/workflows/validate-config.yml@v1
+      with:
+        environment: ${{ steps.scope.outputs.environment }}
+        config-repo: ${{ github.repository }}
+        validate-azure-resources: ${{ inputs.validate_azure_resources || false }}
+      secrets:
+        AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+        CONFIG_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Comment on PR (if validation fails)
+      if: failure() && github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: '❌ **Configuration validation failed**\n\nPlease check the workflow logs and fix the configuration issues before merging.\n\n[View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})'
+          })
+          
+    - name: Comment on PR (if validation succeeds)
+      if: success() && github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: '✅ **Configuration validation passed**\n\nAll environment configurations are valid and ready for deployment.\n\n[View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})'
+          })

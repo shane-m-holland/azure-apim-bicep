@@ -1,0 +1,151 @@
+name: Deploy APIM Infrastructure (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment to deploy (dev, staging, prod)'
+        required: true
+        type: string
+      dry-run:
+        description: 'Perform dry run only (validate without deploying)'
+        type: boolean
+        default: false
+      config-repo:
+        description: 'Repository containing environment configurations'
+        type: string
+        default: ''
+      config-path:
+        description: 'Path to config.env file in config repository'
+        type: string  
+        default: 'environments'
+      apim-tooling-version:
+        description: 'Version/ref of APIM tooling to use'
+        type: string
+        default: 'main'
+    secrets:
+      AZURE_CREDENTIALS:
+        description: 'Azure service principal credentials (JSON)'
+        required: true
+      CONFIG_REPO_TOKEN:
+        description: 'GitHub token for accessing config repository'
+        required: false
+
+jobs:
+  deploy-infrastructure:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    
+    steps:
+    - name: Checkout APIM tooling repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ github.repository }}
+        ref: ${{ inputs.apim-tooling-version }}
+        path: apim-tooling
+        
+    - name: Checkout config repository
+      if: inputs.config-repo != ''
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.config-repo }}
+        token: ${{ secrets.CONFIG_REPO_TOKEN }}
+        path: config-repo
+        
+    - name: Setup Azure CLI
+      uses: azure/CLI@v1
+      with:
+        azcliversion: latest
+        
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+        
+    - name: Install required tools
+      run: |
+        # Install jq for JSON processing
+        sudo apt-get update && sudo apt-get install -y jq
+        
+        # Install yq for YAML processing  
+        pip install yq
+        
+        # Install Bicep CLI
+        az bicep install
+        
+    - name: Setup environment configuration
+      working-directory: apim-tooling
+      run: |
+        # Create environment directory
+        mkdir -p environments/${{ inputs.environment }}
+        
+        # Copy configuration from config repo if specified
+        if [[ "${{ inputs.config-repo }}" != "" ]]; then
+          if [[ -f "../config-repo/${{ inputs.config-path }}/${{ inputs.environment }}/config.env" ]]; then
+            cp "../config-repo/${{ inputs.config-path }}/${{ inputs.environment }}/config.env" \
+               "environments/${{ inputs.environment }}/config.env"
+            echo "✅ Copied config.env from config repository"
+          else
+            echo "❌ Config file not found: ${{ inputs.config-path }}/${{ inputs.environment }}/config.env"
+            exit 1
+          fi
+        else
+          echo "⚠️ No config repository specified - config.env must exist in this repository"
+        fi
+        
+        # Verify config file exists
+        if [[ ! -f "environments/${{ inputs.environment }}/config.env" ]]; then
+          echo "❌ Missing config.env for environment: ${{ inputs.environment }}"
+          echo "Available environments:"
+          ls -la environments/ || echo "No environments directory found"
+          exit 1
+        fi
+        
+    - name: Validate configuration
+      working-directory: apim-tooling
+      run: |
+        echo "🔍 Validating configuration for environment: ${{ inputs.environment }}"
+        chmod +x apim.sh scripts/*.sh
+        ./apim.sh validate ${{ inputs.environment }}
+        
+    - name: Deploy infrastructure (dry run)
+      if: inputs.dry-run == true
+      working-directory: apim-tooling
+      run: |
+        echo "🧪 Performing dry run deployment for environment: ${{ inputs.environment }}"
+        ./apim.sh deploy infrastructure ${{ inputs.environment }} --dry-run
+        
+    - name: Deploy infrastructure
+      if: inputs.dry-run == false
+      working-directory: apim-tooling
+      run: |
+        echo "🚀 Deploying infrastructure for environment: ${{ inputs.environment }}"
+        ./apim.sh deploy infrastructure ${{ inputs.environment }}
+        
+    - name: Upload deployment artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: deployment-logs-${{ inputs.environment }}-${{ github.run_number }}
+        path: |
+          apim-tooling/environments/${{ inputs.environment }}/parameters.json
+        retention-days: 30
+        
+    - name: Post-deployment summary
+      if: always()
+      run: |
+        echo "## 🏗️ Infrastructure Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Dry Run:** ${{ inputs.dry-run }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+        
+        if [[ "${{ job.status }}" == "success" ]]; then
+          if [[ "${{ inputs.dry-run }}" == "true" ]]; then
+            echo "✅ **Result:** Dry run validation completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **Result:** Infrastructure deployed successfully" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "❌ **Result:** Deployment failed - check logs for details" >> $GITHUB_STEP_SUMMARY
+        fi

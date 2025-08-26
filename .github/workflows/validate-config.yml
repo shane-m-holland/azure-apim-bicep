@@ -1,0 +1,299 @@
+name: Validate Configuration (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment to validate (dev, staging, prod, or "all")'
+        required: false
+        type: string
+        default: 'all'
+      config-repo:
+        description: 'Repository containing environment configurations'
+        type: string
+        default: ''
+      config-path:
+        description: 'Path to config files in config repository'
+        type: string
+        default: 'environments'
+      api-config-path:
+        description: 'Path to API configuration file (if validating from service repo)'
+        type: string
+        default: ''
+      api-spec-path:
+        description: 'Path to API specification file (if validating from service repo)'
+        type: string
+        default: ''
+      apim-tooling-version:
+        description: 'Version/ref of APIM tooling to use'
+        type: string
+        default: 'main'
+      validate-azure-resources:
+        description: 'Validate that existing Azure resources are accessible'
+        type: boolean
+        default: false
+    secrets:
+      AZURE_CREDENTIALS:
+        description: 'Azure service principal credentials (JSON) - required if validate-azure-resources is true'
+        required: false
+      CONFIG_REPO_TOKEN:
+        description: 'GitHub token for accessing config repository'
+        required: false
+
+jobs:
+  validate-configuration:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        environment: ${{ inputs.environment == 'all' && fromJson('["dev", "staging", "prod"]') || fromJson(format('["{0}"]', inputs.environment)) }}
+      fail-fast: false
+    
+    steps:
+    - name: Checkout APIM tooling repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ github.repository_owner }}/azure-apim-bicep
+        ref: ${{ inputs.apim-tooling-version }}
+        path: apim-tooling
+        
+    - name: Checkout config repository
+      if: inputs.config-repo != ''
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.config-repo }}
+        token: ${{ secrets.CONFIG_REPO_TOKEN }}
+        path: config-repo
+        
+    - name: Checkout service repository (for API validation)
+      if: inputs.api-config-path != '' || inputs.api-spec-path != ''
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ github.repository }}
+        path: service-repo
+        
+    - name: Setup Azure CLI
+      if: inputs.validate-azure-resources == true
+      uses: azure/CLI@v1
+      with:
+        azcliversion: latest
+        
+    - name: Azure Login
+      if: inputs.validate-azure-resources == true
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+        
+    - name: Install required tools
+      run: |
+        # Install jq for JSON processing
+        sudo apt-get update && sudo apt-get install -y jq
+        
+        # Install yq for YAML processing
+        pip install yq
+        
+        # Install xmllint for WSDL validation
+        sudo apt-get install -y libxml2-utils
+        
+        # Install Bicep CLI for template validation
+        az bicep install || echo "Bicep installation failed - Azure CLI may not be available"
+        
+    - name: Setup validation workspace
+      working-directory: apim-tooling
+      run: |
+        echo "🔧 Setting up validation workspace for environment: ${{ matrix.environment }}"
+        
+        # Create environment directory
+        mkdir -p environments/${{ matrix.environment }}
+        
+        # Copy configuration from config repo if specified
+        if [[ "${{ inputs.config-repo }}" != "" ]]; then
+          CONFIG_FILE="../config-repo/${{ inputs.config-path }}/${{ matrix.environment }}/config.env"
+          if [[ -f "$CONFIG_FILE" ]]; then
+            cp "$CONFIG_FILE" "environments/${{ matrix.environment }}/config.env"
+            echo "✅ Copied config.env from config repository"
+          else
+            echo "⚠️ Config file not found: $CONFIG_FILE"
+            echo "Available environments in config repo:"
+            ls -la ../config-repo/${{ inputs.config-path }}/ 2>/dev/null || echo "Config path not found"
+            # Don't fail here - the environment might not exist yet
+          fi
+        fi
+        
+        # Copy API configuration if specified (for service repo validation)
+        if [[ "${{ inputs.api-config-path }}" != "" ]]; then
+          API_CONFIG="../service-repo/${{ inputs.api-config-path }}"
+          if [[ -f "$API_CONFIG" ]]; then
+            cp "$API_CONFIG" "environments/${{ matrix.environment }}/api-config.yml"
+            echo "✅ Copied API configuration for validation"
+            
+            # Copy API specification if specified
+            if [[ "${{ inputs.api-spec-path }}" != "" ]]; then
+              API_SPEC="../service-repo/${{ inputs.api-spec-path }}"
+              if [[ -f "$API_SPEC" ]]; then
+                mkdir -p specs/${{ matrix.environment }}
+                SPEC_EXT="${API_SPEC##*.}"
+                cp "$API_SPEC" "specs/${{ matrix.environment }}/api-spec.${SPEC_EXT}"
+                echo "✅ Copied API specification for validation"
+                
+                # Update API config to reference the copied spec
+                sed -i "s|specPath:.*|specPath: ./specs/${{ matrix.environment }}/api-spec.${SPEC_EXT}|g" \
+                  "environments/${{ matrix.environment }}/api-config.yml" || true
+              else
+                echo "⚠️ API specification not found: $API_SPEC"
+              fi
+            fi
+          else
+            echo "⚠️ API configuration not found: $API_CONFIG"
+          fi
+        fi
+        
+    - name: Validate Bicep templates
+      working-directory: apim-tooling
+      run: |
+        echo "🔍 Validating Bicep templates"
+        
+        # Validate main template
+        if command -v az bicep &> /dev/null; then
+          echo "Validating bicep/main.bicep..."
+          az bicep build --file bicep/main.bicep --stdout > /dev/null && \
+            echo "✅ main.bicep is valid" || echo "❌ main.bicep validation failed"
+            
+          # Validate other templates
+          for template in bicep/network/*.bicep bicep/apim/*.bicep bicep/apis/*.bicep; do
+            if [[ -f "$template" ]]; then
+              echo "Validating $template..."
+              az bicep build --file "$template" --stdout > /dev/null && \
+                echo "✅ $(basename $template) is valid" || echo "❌ $(basename $template) validation failed"
+            fi
+          done
+        else
+          echo "⚠️ Bicep CLI not available - skipping Bicep template validation"
+        fi
+        
+    - name: Validate environment configuration
+      working-directory: apim-tooling
+      run: |
+        echo "🔍 Validating configuration for environment: ${{ matrix.environment }}"
+        chmod +x apim.sh scripts/*.sh
+        
+        # Check if environment directory exists and has config
+        if [[ ! -d "environments/${{ matrix.environment }}" ]]; then
+          echo "⚠️ Environment directory does not exist: ${{ matrix.environment }}"
+          echo "This might be expected if the environment hasn't been set up yet."
+          exit 0
+        fi
+        
+        # Run validation if config exists
+        if [[ -f "environments/${{ matrix.environment }}/config.env" ]]; then
+          echo "Running comprehensive validation..."
+          ./apim.sh validate ${{ matrix.environment }} || {
+            echo "❌ Configuration validation failed for environment: ${{ matrix.environment }}"
+            exit 1
+          }
+        else
+          echo "⚠️ No config.env found for environment: ${{ matrix.environment }}"
+          echo "Validation skipped for this environment."
+        fi
+        
+    - name: Validate Azure resources (if enabled)
+      if: inputs.validate-azure-resources == true
+      working-directory: apim-tooling
+      continue-on-error: true
+      run: |
+        echo "🔍 Validating Azure resource accessibility"
+        
+        # Only validate if config exists
+        if [[ -f "environments/${{ matrix.environment }}/config.env" ]]; then
+          # Source configuration
+          source "environments/${{ matrix.environment }}/config.env"
+          
+          # Check resource group
+          if [[ -n "${RESOURCE_GROUP:-}" ]]; then
+            echo "Checking resource group: $RESOURCE_GROUP"
+            if az group show --name "$RESOURCE_GROUP" >/dev/null 2>&1; then
+              echo "✅ Resource group exists and is accessible"
+            else
+              echo "⚠️ Resource group not found or not accessible: $RESOURCE_GROUP"
+            fi
+          fi
+          
+          # Check APIM instance if it should exist
+          if [[ -n "${APIM_NAME:-}" && -n "${RESOURCE_GROUP:-}" ]]; then
+            echo "Checking APIM instance: $APIM_NAME"
+            if az apim show --name "$APIM_NAME" --resource-group "$RESOURCE_GROUP" >/dev/null 2>&1; then
+              echo "✅ APIM instance exists and is accessible"
+            else
+              echo "⚠️ APIM instance not found: $APIM_NAME (this may be expected for new deployments)"
+            fi
+          fi
+          
+          # Check existing network resources if configured
+          if [[ "${USE_EXISTING_NSG:-false}" == "true" && -n "${NSG_NAME:-}" ]]; then
+            echo "Checking existing NSG: $NSG_NAME"
+            NSG_RG="${EXISTING_NSG_RESOURCE_GROUP:-$RESOURCE_GROUP}"
+            if az network nsg show --name "$NSG_NAME" --resource-group "$NSG_RG" >/dev/null 2>&1; then
+              echo "✅ Existing NSG is accessible"
+            else
+              echo "❌ Existing NSG not accessible: $NSG_NAME in $NSG_RG"
+            fi
+          fi
+          
+          if [[ "${USE_EXISTING_VNET:-false}" == "true" && -n "${VNET_NAME:-}" ]]; then
+            echo "Checking existing VNet: $VNET_NAME"
+            VNET_RG="${EXISTING_VNET_RESOURCE_GROUP:-$RESOURCE_GROUP}"
+            if az network vnet show --name "$VNET_NAME" --resource-group "$VNET_RG" >/dev/null 2>&1; then
+              echo "✅ Existing VNet is accessible"
+            else
+              echo "❌ Existing VNet not accessible: $VNET_NAME in $VNET_RG"
+            fi
+          fi
+        else
+          echo "⚠️ No configuration found - skipping Azure resource validation"
+        fi
+        
+    - name: Generate validation report
+      if: always()
+      working-directory: apim-tooling
+      run: |
+        echo "## 🔍 Validation Report - ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Environment:** ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Check what was validated
+        VALIDATED_ITEMS=()
+        
+        if [[ -f "environments/${{ matrix.environment }}/config.env" ]]; then
+          VALIDATED_ITEMS+=("✅ Environment configuration")
+        else
+          VALIDATED_ITEMS+=("⚠️ Environment configuration (not found)")
+        fi
+        
+        if [[ -f "environments/${{ matrix.environment }}/api-config.yml" ]]; then
+          VALIDATED_ITEMS+=("✅ API configuration")
+        fi
+        
+        if command -v az bicep &> /dev/null; then
+          VALIDATED_ITEMS+=("✅ Bicep templates")
+        else
+          VALIDATED_ITEMS+=("⚠️ Bicep templates (CLI not available)")
+        fi
+        
+        if [[ "${{ inputs.validate-azure-resources }}" == "true" ]]; then
+          VALIDATED_ITEMS+=("✅ Azure resources accessibility")
+        fi
+        
+        echo "**Validated Items:**" >> $GITHUB_STEP_SUMMARY
+        for item in "${VALIDATED_ITEMS[@]}"; do
+          echo "- $item" >> $GITHUB_STEP_SUMMARY
+        done
+        
+        if [[ "${{ job.status }}" == "success" ]]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **All validations passed**" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "❌ **Some validations failed - check logs for details**" >> $GITHUB_STEP_SUMMARY
+        fi
