@@ -153,8 +153,8 @@ validate_openapi_spec() {
     # Check for OpenAPI version indicators
     if [[ "$is_yaml" == "true" ]]; then
         if command -v yq &> /dev/null; then
-            local openapi_version=$(yq eval '.openapi // .swagger // empty' "$spec_path" 2>/dev/null)
-            if [[ -n "$openapi_version" ]]; then
+            local openapi_version=$(yq eval '.openapi // .swagger // null' "$spec_path" 2>/dev/null)
+            if [[ -n "$openapi_version" && "$openapi_version" != "null" ]]; then
                 pass "OpenAPI spec version: $openapi_version"
                 
                 # Basic OpenAPI structure validation
