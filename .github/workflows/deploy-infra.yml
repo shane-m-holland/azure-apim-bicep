@@ -55,7 +55,8 @@ jobs:
     - name: Setup Azure CLI
       uses: azure/CLI@v1
       with:
-        azcliversion: latest
+        inlineScript: |
+          echo "Azure CLI is available"
         
     - name: Azure Login
       uses: azure/login@v1
