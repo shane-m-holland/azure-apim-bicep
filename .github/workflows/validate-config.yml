@@ -50,10 +50,10 @@ jobs:
 
     environment: ${{ inputs.environment }}
     
-    strategy:
-      matrix:
-        environment: ${{ inputs.environment }}
-      fail-fast: false
+    # strategy:
+    #   matrix:
+    #     environment: ${{ inputs.environment == 'all' && fromJson('["dev", "staging", "prod"]') || fromJson(format('["{0}"]', inputs.environment)) }}
+    #   fail-fast: false
     
     steps:
     - name: Checkout APIM tooling repository
