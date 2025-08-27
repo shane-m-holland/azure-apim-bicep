@@ -82,6 +82,48 @@ jobs:
       with:
         inlineScript: |
           echo "Azure CLI is available"
+    - name: Debug Azure Credentials Secret
+      run: |
+        if [ -z "${{ secrets.AZURE_CREDENTIALS }}" ]; then
+          echo "❌ AZURE_CREDENTIALS secret is empty or not accessible"
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Repository: ${{ github.repository }}"
+        else
+          echo "✅ AZURE_CREDENTIALS secret is accessible"
+          echo "Secret length: $(echo '${{ secrets.AZURE_CREDENTIALS }}' | wc -c) characters"
+          
+          # Validate JSON format without exposing content
+          if echo '${{ secrets.AZURE_CREDENTIALS }}' | jq empty 2>/dev/null; then
+            echo "✅ Secret is valid JSON"
+            
+            # Check for required fields without showing values
+            if echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -e '.clientId' > /dev/null; then
+              echo "✅ clientId field present"
+            else
+              echo "❌ clientId field missing"
+            fi
+            
+            if echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -e '.clientSecret' > /dev/null; then
+              echo "✅ clientSecret field present" 
+            else
+              echo "❌ clientSecret field missing"
+            fi
+            
+            if echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -e '.tenantId' > /dev/null; then
+              echo "✅ tenantId field present"
+            else
+              echo "❌ tenantId field missing"
+            fi
+            
+            if echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -e '.subscriptionId' > /dev/null; then
+              echo "✅ subscriptionId field present"
+            else
+              echo "❌ subscriptionId field missing"
+            fi
+          else
+            echo "❌ Secret is not valid JSON"
+          fi
+        fi
         
     - name: Azure Login
       if: inputs.validate-azure-resources == true
