@@ -32,6 +32,10 @@ on:
         description: 'Validate that existing Azure resources are accessible'
         type: boolean
         default: false
+      infra-only-validation:
+        description: 'Validate only infrastructure components (skip API validation)'
+        type: boolean
+        default: false
     secrets:
       AZURE_CREDENTIALS:
         description: 'Azure service principal credentials (JSON) - required if validate-azure-resources is true'
@@ -188,7 +192,15 @@ jobs:
         # Run validation if config exists
         if [[ -f "environments/${{ matrix.environment }}/config.env" ]]; then
           echo "Running comprehensive validation..."
-          ./apim.sh validate ${{ matrix.environment }} || {
+          
+          # Build validation command with infra-only flag if enabled
+          VALIDATION_CMD="./apim.sh validate ${{ matrix.environment }}"
+          if [[ "${{ inputs.infra-only-validation }}" == "true" ]]; then
+            VALIDATION_CMD="$VALIDATION_CMD --infra-only"
+            echo "Infrastructure-only validation enabled"
+          fi
+          
+          $VALIDATION_CMD || {
             echo "❌ Configuration validation failed for environment: ${{ matrix.environment }}"
             exit 1
           }
@@ -259,6 +271,7 @@ jobs:
       run: |
         echo "## 🔍 Validation Report - ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
         echo "**Environment:** ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Mode:** ${{ inputs.infra-only-validation == true && 'Infrastructure-only' || 'Full (Infrastructure + APIs)' }}" >> $GITHUB_STEP_SUMMARY
         echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
         echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
@@ -272,7 +285,9 @@ jobs:
           VALIDATED_ITEMS+=("⚠️ Environment configuration (not found)")
         fi
         
-        if [[ -f "environments/${{ matrix.environment }}/api-config.yml" ]]; then
+        if [[ "${{ inputs.infra-only-validation }}" == "true" ]]; then
+          VALIDATED_ITEMS+=("ℹ️ API configuration (skipped in infrastructure-only mode)")
+        elif [[ -f "environments/${{ matrix.environment }}/api-config.yml" ]]; then
           VALIDATED_ITEMS+=("✅ API configuration")
         fi
         

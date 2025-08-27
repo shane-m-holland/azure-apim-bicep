@@ -90,6 +90,7 @@ EXAMPLES:
     
     # Validation
     apim validate dev
+    apim validate dev --infra-only
     apim validate dev ./my-config.yaml
     
     # Infrastructure deployment
@@ -152,7 +153,7 @@ show_command_help() {
             echo "  apim setup"
             ;;
         "validate")
-            echo "apim validate [environment] [config-file]"
+            echo "apim validate [environment] [config-file] [--infra-only]"
             echo ""
             echo "Comprehensive validation of configurations, API specs, and prerequisites"
             echo ""
@@ -160,11 +161,15 @@ show_command_help() {
             echo "  environment    Environment to validate (optional, validates all if omitted)"
             echo "  config-file    API configuration file (JSON/YAML, auto-discovered if omitted)"
             echo ""
+            echo "Options:"
+            echo "  --infra-only   Validate only infrastructure components (skip API validation)"
+            echo ""
             echo "Examples:"
             echo "  apim validate"
             echo "  apim validate dev"
+            echo "  apim validate dev --infra-only"
             echo "  apim validate uat ./my-apis.yaml"
-            echo "  apim validate test"
+            echo "  apim validate test --infra-only"
             ;;
         "deploy")
             case "$subcommand" in

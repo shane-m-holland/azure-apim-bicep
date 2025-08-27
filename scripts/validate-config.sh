@@ -65,18 +65,24 @@ warn() {
 }
 
 usage() {
-    echo "Usage: $0 [environment] [config-file]"
+    echo "Usage: $0 [environment] [config-file] [--infra-only]"
     echo ""
     echo "Arguments:"
     echo "  environment    Environment to validate (dev, staging, prod) - optional"
     echo "  config-file    API configuration file to validate (JSON/YAML supported)"
     echo "                 Default: auto-discover api-config.yaml or api-config.json"
     echo ""
+    echo "Options:"
+    echo "  --infra-only, --infrastructure-only"
+    echo "                 Validate only infrastructure components (skip API validation)"
+    echo ""
     echo "Examples:"
     echo "  $0                          # Validate all environments and default config"
     echo "  $0 dev                      # Validate dev environment only"
+    echo "  $0 dev --infra-only         # Validate dev environment infrastructure only"
     echo "  $0 dev ./my-apis.yaml       # Validate dev environment with YAML config"
     echo "  $0 dev ./my-apis.json       # Validate dev environment with JSON config"
+    echo "  $0 --infra-only             # Validate all environments, infrastructure only"
     exit 1
 }
 
@@ -250,12 +256,16 @@ validate_project_structure() {
     # Check for required files
     local required_files=(
         "bicep/main.bicep"
-        "bicep/apis/api-template.bicep"
         "bicep/apim/apim-service.bicep"
         "bicep/network/nsg.bicep"
         "bicep/network/vnet.bicep"
         "bicep/products/products.bicep"
     )
+    
+    # Add API template only if not infra-only mode
+    if [[ "${INFRA_ONLY:-false}" != "true" ]]; then
+        required_files+=("bicep/apis/api-template.bicep")
+    fi
     
     for file in "${required_files[@]}"; do
         if [[ -f "$file" ]]; then
@@ -266,12 +276,23 @@ validate_project_structure() {
     done
     
     # Check for required directories
-    local required_dirs=("environments" "specs" "scripts")
+    local required_dirs=("environments" "scripts")
+    
+    # Add specs directory only if not infra-only mode
+    if [[ "${INFRA_ONLY:-false}" != "true" ]]; then
+        required_dirs+=("specs")
+    fi
+    
     for dir in "${required_dirs[@]}"; do
         if [[ -d "$dir" ]]; then
             pass "Required directory exists: $dir"
         else
-            fail "Required directory missing: $dir"
+            if [[ "$dir" == "specs" && "${INFRA_ONLY:-false}" == "true" ]]; then
+                # Skip specs requirement in infra-only mode
+                pass "Directory 'specs' not required in infrastructure-only mode"
+            else
+                fail "Required directory missing: $dir"
+            fi
         fi
     done
     
@@ -697,7 +718,12 @@ validate_api_config() {
 validate_bicep_templates() {
     log "Validating Bicep templates..."
     
-    local templates=("bicep/main.bicep" "bicep/apis/api-template.bicep")
+    local templates=("bicep/main.bicep")
+    
+    # Add API template only if not infra-only mode
+    if [[ "${INFRA_ONLY:-false}" != "true" ]]; then
+        templates+=("bicep/apis/api-template.bicep")
+    fi
     
     for template in "${templates[@]}"; do
         if [[ -f "$template" ]]; then
@@ -784,16 +810,48 @@ validate_bicep_templates() {
 # Main Validation Logic
 # ──────────────────────────────────────────────────────────────────────────────
 
-ENVIRONMENT="${1:-}"
-# If config file is provided as argument, use it directly; otherwise find config file
-if [[ -n "${2:-}" ]]; then
-    CONFIG_FILE="$2"
-else
+# Parse arguments
+ENVIRONMENT=""
+CONFIG_FILE=""
+INFRA_ONLY=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --infra-only|--infrastructure-only)
+            INFRA_ONLY=true
+            shift
+            ;;
+        --help|-h)
+            usage
+            ;;
+        -*)
+            error "Unknown option: $1"
+            usage
+            ;;
+        *)
+            if [[ -z "$ENVIRONMENT" ]]; then
+                ENVIRONMENT="$1"
+            elif [[ -z "$CONFIG_FILE" ]]; then
+                CONFIG_FILE="$1"
+            else
+                error "Too many arguments: $1"
+                usage
+            fi
+            shift
+            ;;
+    esac
+done
+
+# If config file not provided, auto-discover it (unless infra-only mode)
+if [[ -z "$CONFIG_FILE" && "${INFRA_ONLY}" != "true" ]]; then
     # Auto-discover config file (prefer YAML, fallback to JSON)
     CONFIG_FILE=$(find_config_file "./environments/${ENVIRONMENT:-dev}/api-config" "api-config" 2>/dev/null || echo "./environments/${ENVIRONMENT:-dev}/api-config.json")
 fi
 
 echo "🔍 APIM Configuration Validation"
+if [[ "${INFRA_ONLY}" == "true" ]]; then
+    echo "   (Infrastructure-only mode)"
+fi
 echo "═══════════════════════════════════════════"
 echo ""
 
@@ -825,8 +883,13 @@ else
     fi
 fi
 
-# Validate API configuration
-validate_api_config "$CONFIG_FILE"
+# Validate API configuration (skip in infra-only mode)
+if [[ "${INFRA_ONLY}" != "true" ]]; then
+    validate_api_config "$CONFIG_FILE"
+else
+    echo ""
+    log "Skipping API configuration validation (infrastructure-only mode)"
+fi
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Summary
@@ -843,12 +906,21 @@ echo -e "${YELLOW}Warnings: $WARNING_CHECKS${NC}"
 
 if [[ $FAILED_CHECKS -eq 0 ]]; then
     echo ""
-    success "Validation completed successfully! ✨"
-    echo ""
-    echo "Your configuration is ready for deployment."
-    if [[ -n "$ENVIRONMENT" ]]; then
-        echo "Run: ./scripts/deploy-infrastructure.sh $ENVIRONMENT"
-        echo "Then: ./scripts/deploy-apis.sh $ENVIRONMENT"
+    if [[ "${INFRA_ONLY}" == "true" ]]; then
+        success "Infrastructure validation completed successfully! ✨"
+        echo ""
+        echo "Your infrastructure configuration is ready for deployment."
+        if [[ -n "$ENVIRONMENT" ]]; then
+            echo "Run: ./scripts/deploy-infrastructure.sh $ENVIRONMENT"
+        fi
+    else
+        success "Validation completed successfully! ✨"
+        echo ""
+        echo "Your configuration is ready for deployment."
+        if [[ -n "$ENVIRONMENT" ]]; then
+            echo "Run: ./scripts/deploy-infrastructure.sh $ENVIRONMENT"
+            echo "Then: ./scripts/deploy-apis.sh $ENVIRONMENT"
+        fi
     fi
     exit 0
 else
