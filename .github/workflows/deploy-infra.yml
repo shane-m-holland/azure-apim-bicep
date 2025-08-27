@@ -40,7 +40,7 @@ jobs:
     - name: Checkout APIM tooling repository
       uses: actions/checkout@v4
       with:
-        repository: ${{ github.repository }}
+        repository: ${{ github.repository_owner }}/azure-apim-bicep
         ref: ${{ inputs.apim-tooling-version }}
         path: apim-tooling
         
