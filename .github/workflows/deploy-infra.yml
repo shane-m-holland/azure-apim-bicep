@@ -107,7 +107,7 @@ jobs:
       run: |
         echo "🔍 Validating configuration for environment: ${{ inputs.environment }}"
         chmod +x apim.sh scripts/*.sh
-        ./apim.sh validate ${{ inputs.environment }}
+        ./apim.sh validate ${{ inputs.environment }} --infra-only
         
     - name: Deploy infrastructure (dry run)
       if: inputs.dry-run == true
