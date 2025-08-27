@@ -194,27 +194,36 @@ header "🏗️  APIM Configuration"
 # SKU Configuration with recommendations
 echo ""
 info "APIM SKU Options:"
-echo "  - Developer: For development/testing (low cost, single unit)"
-echo "  - Basic: Entry level for production (99.9% SLA)"
-echo "  - Standard: Standard production tier (99.9% SLA, multi-region)"
-echo "  - Premium: Enterprise tier (99.95% SLA, VNet, multi-region)"
+echo ""
+info "Classic SKUs:"
+echo "  - Developer: For development/testing (low cost, single unit, no SLA)"
+echo "  - Basic: Entry level for production (99.95% SLA, no VNet support)"
+echo "  - Standard: Standard production tier (99.95% SLA, multi-region, no VNet support)"
+echo "  - Premium: Enterprise tier (99.99% SLA, VNet support, multi-region)"
+echo ""
+info "v2 SKUs (Recommended for new deployments):"
+echo "  - BasicV2: Entry level for production (99.95% SLA, VNet support)"
+echo "  - StandardV2: Standard production tier (99.95% SLA, VNet support, multi-region)"  
+echo "  - PremiumV2: Enterprise tier (99.99% SLA, VNet support, multi-region, enhanced features)"
+echo ""
+info "💡 VNet Integration: v2 SKUs support VNet integration out of the box, classic SKUs require Premium tier"
 
 case "$ENVIRONMENT" in
     dev|development|test|testing)
         DEFAULT_SKU="Developer"
         ;;
     staging|stage|qa)
-        DEFAULT_SKU="Basic"
+        DEFAULT_SKU="BasicV2"
         ;;
     prod|production)
-        DEFAULT_SKU="Standard"
+        DEFAULT_SKU="StandardV2"
         ;;
     *)
         DEFAULT_SKU="Developer"
         ;;
 esac
 
-SKU_NAME=$(read_input "APIM SKU" "$DEFAULT_SKU" "^(Developer|Basic|Standard|Premium)$")
+SKU_NAME=$(read_input "APIM SKU" "$DEFAULT_SKU" "^(Developer|Basic|Standard|Premium|BasicV2|StandardV2|PremiumV2)$")
 
 # Capacity based on SKU
 case "$SKU_NAME" in
@@ -222,16 +231,44 @@ case "$SKU_NAME" in
         DEFAULT_CAPACITY=1
         info "Developer SKU supports only 1 capacity unit"
         ;;
-    "Basic"|"Standard")
+    "Basic"|"Standard"|"BasicV2")
         DEFAULT_CAPACITY=1
+        if [[ "$SKU_NAME" == "BasicV2" ]]; then
+            info "BasicV2 SKU supports 1-2 capacity units"
+        fi
         ;;
-    "Premium")
+    "StandardV2")
         DEFAULT_CAPACITY=1
-        info "Premium SKU supports 1-12 capacity units"
+        info "StandardV2 SKU supports 1-10 capacity units"
+        ;;
+    "Premium"|"PremiumV2")
+        DEFAULT_CAPACITY=1
+        if [[ "$SKU_NAME" == "Premium" ]]; then
+            info "Premium SKU supports 1-12 capacity units"
+        else
+            info "PremiumV2 SKU supports 1-12 capacity units with enhanced performance"
+        fi
         ;;
 esac
 
 SKU_CAPACITY=$(read_input "APIM capacity" "$DEFAULT_CAPACITY" "^[0-9]+$")
+
+# VNet integration guidance based on selected SKU
+echo ""
+case "$SKU_NAME" in
+    "Developer"|"Basic"|"Standard")
+        if [[ "$USE_EXISTING_VNET" == "true" ]] || [[ -n "$VNET_NAME" && "$VNET_NAME" != "none" ]]; then
+            warn "⚠️  VNet Integration Notice:"
+            echo "   Selected SKU ($SKU_NAME) does not support VNet integration."
+            echo "   Consider using BasicV2/StandardV2 for VNet integration, or Premium for classic SKU."
+        fi
+        ;;
+    "BasicV2"|"StandardV2"|"Premium"|"PremiumV2")
+        if [[ "$USE_EXISTING_VNET" == "true" ]] || [[ -n "$VNET_NAME" && "$VNET_NAME" != "none" ]]; then
+            success "✅ VNet Integration: Selected SKU ($SKU_NAME) supports VNet integration"
+        fi
+        ;;
+esac
 
 header "👤 Publisher Information"
 

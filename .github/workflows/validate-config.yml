@@ -76,7 +76,8 @@ jobs:
       if: inputs.validate-azure-resources == true
       uses: azure/CLI@v1
       with:
-        azcliversion: latest
+        inlineScript: |
+          echo "Azure CLI is available"
         
     - name: Azure Login
       if: inputs.validate-azure-resources == true
