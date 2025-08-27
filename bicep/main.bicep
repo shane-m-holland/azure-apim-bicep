@@ -133,24 +133,19 @@ module vnet 'network/vnet.bicep' = if (!useExistingVnet) {
     vnetCidr: vnetCidr
     subnetName: subnetName
     subnetCidr: subnetCidr
-    createFullVnet: true
   }
 }
 
 // -------------------------------------------
 // 🧱 Deploy New Subnet in Existing VNet (Conditional)
 // -------------------------------------------
-module newSubnetInExistingVnet 'network/vnet.bicep' = if (useExistingVnet && !useExistingSubnet && createNewSubnetInExistingVnet) {
+module newSubnetInExistingVnet 'network/cross-rg-subnet.bicep' = if (useExistingVnet && !useExistingSubnet && createNewSubnetInExistingVnet) {
   name: 'deploy-new-subnet'
   params: {
-    vnetName: useExistingVnet ? existingVnetName : vnetName
-    location: location
-    nsgResourceId: useExistingNsg ? existingResources.outputs.nsgResourceId : nsg.outputs.id
-    vnetCidr: vnetCidr
+    existingVnetResourceId: existingResources.outputs.vnetResourceId
     subnetName: subnetName
     subnetCidr: subnetCidr
-    createFullVnet: false
-    existingVnetResourceId: existingResources.outputs.vnetResourceId
+    nsgResourceId: useExistingNsg ? existingResources.outputs.nsgResourceId : nsg.outputs.id
   }
 }
 
