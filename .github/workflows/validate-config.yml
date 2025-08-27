@@ -37,9 +37,9 @@ on:
         type: boolean
         default: false
     secrets:
-      AZURE_CREDENTIALS:
-        description: 'Azure service principal credentials (JSON) - required if validate-azure-resources is true'
-        required: false
+      # AZURE_CREDENTIALS:
+      #   description: 'Azure service principal credentials (JSON) - required if validate-azure-resources is true'
+      #   required: false
       CONFIG_REPO_TOKEN:
         description: 'GitHub token for accessing config repository'
         required: false
@@ -47,10 +47,12 @@ on:
 jobs:
   validate-configuration:
     runs-on: ubuntu-latest
+
+    environment: ${{ inputs.environment }}
     
     strategy:
       matrix:
-        environment: ${{ inputs.environment == 'all' && fromJson('["dev", "staging", "prod"]') || fromJson(format('["{0}"]', inputs.environment)) }}
+        environment: ${{ inputs.environment }}
       fail-fast: false
     
     steps:
@@ -82,6 +84,7 @@ jobs:
       with:
         inlineScript: |
           echo "Azure CLI is available"
+          
     - name: Debug Azure Credentials Secret
       run: |
         if [ -z "${{ secrets.AZURE_CREDENTIALS }}" ]; then
