@@ -24,9 +24,9 @@ on:
         type: string
         default: 'main'
     secrets:
-      # AZURE_CREDENTIALS:
-      #   description: 'Azure service principal credentials (JSON)'
-      #   required: true
+      AZURE_CREDENTIALS:
+        description: 'Azure service principal credentials (JSON)'
+        required: true
       CONFIG_REPO_TOKEN:
         description: 'GitHub token for accessing config repository'
         required: false

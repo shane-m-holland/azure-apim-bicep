@@ -37,9 +37,9 @@ on:
         type: boolean
         default: false
     secrets:
-      # AZURE_CREDENTIALS:
-      #   description: 'Azure service principal credentials (JSON) - required if validate-azure-resources is true'
-      #   required: false
+      AZURE_CREDENTIALS:
+        description: 'Azure service principal credentials (JSON) - required if validate-azure-resources is true'
+        required: false
       CONFIG_REPO_TOKEN:
         description: 'GitHub token for accessing config repository'
         required: false
@@ -130,16 +130,16 @@ jobs:
     - name: Setup validation workspace
       working-directory: apim-tooling
       run: |
-        echo "🔧 Setting up validation workspace for environment: ${{ matrix.environment }}"
+        echo "🔧 Setting up validation workspace for environment: ${{ inputs.environment }}"
         
         # Create environment directory
-        mkdir -p environments/${{ matrix.environment }}
+        mkdir -p environments/${{ inputs.environment }}
         
         # Copy configuration from config repo if specified
         if [[ "${{ inputs.config-repo }}" != "" ]]; then
-          CONFIG_FILE="../config-repo/${{ inputs.config-path }}/${{ matrix.environment }}/config.env"
+          CONFIG_FILE="../config-repo/${{ inputs.config-path }}/${{ inputs.environment }}/config.env"
           if [[ -f "$CONFIG_FILE" ]]; then
-            cp "$CONFIG_FILE" "environments/${{ matrix.environment }}/config.env"
+            cp "$CONFIG_FILE" "environments/${{ inputs.environment }}/config.env"
             echo "✅ Copied config.env from config repository"
           else
             echo "⚠️ Config file not found: $CONFIG_FILE"
@@ -153,21 +153,21 @@ jobs:
         if [[ "${{ inputs.api-config-path }}" != "" ]]; then
           API_CONFIG="../service-repo/${{ inputs.api-config-path }}"
           if [[ -f "$API_CONFIG" ]]; then
-            cp "$API_CONFIG" "environments/${{ matrix.environment }}/api-config.yml"
+            cp "$API_CONFIG" "environments/${{ inputs.environment }}/api-config.yml"
             echo "✅ Copied API configuration for validation"
             
             # Copy API specification if specified
             if [[ "${{ inputs.api-spec-path }}" != "" ]]; then
               API_SPEC="../service-repo/${{ inputs.api-spec-path }}"
               if [[ -f "$API_SPEC" ]]; then
-                mkdir -p specs/${{ matrix.environment }}
+                mkdir -p specs/${{ inputs.environment }}
                 SPEC_EXT="${API_SPEC##*.}"
-                cp "$API_SPEC" "specs/${{ matrix.environment }}/api-spec.${SPEC_EXT}"
+                cp "$API_SPEC" "specs/${{ inputs.environment }}/api-spec.${SPEC_EXT}"
                 echo "✅ Copied API specification for validation"
                 
                 # Update API config to reference the copied spec
-                sed -i "s|specPath:.*|specPath: ./specs/${{ matrix.environment }}/api-spec.${SPEC_EXT}|g" \
-                  "environments/${{ matrix.environment }}/api-config.yml" || true
+                sed -i "s|specPath:.*|specPath: ./specs/${{ inputs.environment }}/api-spec.${SPEC_EXT}|g" \
+                  "environments/${{ inputs.environment }}/api-config.yml" || true
               else
                 echo "⚠️ API specification not found: $API_SPEC"
               fi
@@ -203,33 +203,33 @@ jobs:
     - name: Validate environment configuration
       working-directory: apim-tooling
       run: |
-        echo "🔍 Validating configuration for environment: ${{ matrix.environment }}"
+        echo "🔍 Validating configuration for environment: ${{ inputs.environment }}"
         chmod +x apim.sh scripts/*.sh
         
         # Check if environment directory exists and has config
-        if [[ ! -d "environments/${{ matrix.environment }}" ]]; then
-          echo "⚠️ Environment directory does not exist: ${{ matrix.environment }}"
+        if [[ ! -d "environments/${{ inputs.environment }}" ]]; then
+          echo "⚠️ Environment directory does not exist: ${{ inputs.environment }}"
           echo "This might be expected if the environment hasn't been set up yet."
           exit 0
         fi
         
         # Run validation if config exists
-        if [[ -f "environments/${{ matrix.environment }}/config.env" ]]; then
+        if [[ -f "environments/${{ inputs.environment }}/config.env" ]]; then
           echo "Running comprehensive validation..."
           
           # Build validation command with infra-only flag if enabled
-          VALIDATION_CMD="./apim.sh validate ${{ matrix.environment }}"
+          VALIDATION_CMD="./apim.sh validate ${{ inputs.environment }}"
           if [[ "${{ inputs.infra-only-validation }}" == "true" ]]; then
             VALIDATION_CMD="$VALIDATION_CMD --infra-only"
             echo "Infrastructure-only validation enabled"
           fi
           
           $VALIDATION_CMD || {
-            echo "❌ Configuration validation failed for environment: ${{ matrix.environment }}"
+            echo "❌ Configuration validation failed for environment: ${{ inputs.environment }}"
             exit 1
           }
         else
-          echo "⚠️ No config.env found for environment: ${{ matrix.environment }}"
+          echo "⚠️ No config.env found for environment: ${{ inputs.environment }}"
           echo "Validation skipped for this environment."
         fi
         
@@ -241,9 +241,9 @@ jobs:
         echo "🔍 Validating Azure resource accessibility"
         
         # Only validate if config exists
-        if [[ -f "environments/${{ matrix.environment }}/config.env" ]]; then
+        if [[ -f "environments/${{ inputs.environment }}/config.env" ]]; then
           # Source configuration
-          source "environments/${{ matrix.environment }}/config.env"
+          source "environments/${{ inputs.environment }}/config.env"
           
           # Check resource group
           if [[ -n "${RESOURCE_GROUP:-}" ]]; then
@@ -293,8 +293,8 @@ jobs:
       if: always()
       working-directory: apim-tooling
       run: |
-        echo "## 🔍 Validation Report - ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Environment:** ${{ matrix.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "## 🔍 Validation Report - ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
         echo "**Mode:** ${{ inputs.infra-only-validation == true && 'Infrastructure-only' || 'Full (Infrastructure + APIs)' }}" >> $GITHUB_STEP_SUMMARY
         echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
         echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
@@ -303,7 +303,7 @@ jobs:
         # Check what was validated
         VALIDATED_ITEMS=()
         
-        if [[ -f "environments/${{ matrix.environment }}/config.env" ]]; then
+        if [[ -f "environments/${{ inputs.environment }}/config.env" ]]; then
           VALIDATED_ITEMS+=("✅ Environment configuration")
         else
           VALIDATED_ITEMS+=("⚠️ Environment configuration (not found)")
@@ -311,7 +311,7 @@ jobs:
         
         if [[ "${{ inputs.infra-only-validation }}" == "true" ]]; then
           VALIDATED_ITEMS+=("ℹ️ API configuration (skipped in infrastructure-only mode)")
-        elif [[ -f "environments/${{ matrix.environment }}/api-config.yml" ]]; then
+        elif [[ -f "environments/${{ inputs.environment }}/api-config.yml" ]]; then
           VALIDATED_ITEMS+=("✅ API configuration")
         fi
         
