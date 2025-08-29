@@ -43,6 +43,22 @@ on:
         description: 'Perform dry run only'
         type: boolean
         default: false
+      use-spec-artifact:
+        description: 'Use artifact instead of repository file for API specification'
+        type: boolean
+        default: false
+      spec-artifact-name:
+        description: 'Name of the artifact containing API specification'
+        type: string
+        default: 'api-specs'
+      spec-artifact-path:
+        description: 'Path within artifact to the specification file'
+        type: string
+        default: ''
+      build-workflow-run-id:
+        description: 'Run ID of workflow that generated the spec artifact (optional, uses current run if not specified)'
+        type: string
+        default: ''
     secrets:
       # AZURE_CREDENTIALS:
       #   description: 'Azure service principal credentials (JSON)'
@@ -78,6 +94,15 @@ jobs:
         repository: ${{ github.repository }}
         ref: ${{ github.sha }}
         path: service-repo
+        
+    - name: Download API specification artifact
+      if: inputs.use-spec-artifact == true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.spec-artifact-name }}
+        path: ./spec-artifact
+        run-id: ${{ inputs.build-workflow-run-id != '' && inputs.build-workflow-run-id || github.run_id }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
         
     - name: Setup Azure CLI
       uses: azure/CLI@v1
@@ -136,24 +161,62 @@ jobs:
           exit 1
         fi
         
-        # Copy API specification from service repo
-        API_SPEC="../service-repo/${{ inputs.api-spec-path }}"
-        if [[ -f "$API_SPEC" ]]; then
-          # Determine spec file extension and copy appropriately
-          SPEC_EXT="${API_SPEC##*.}"
-          SPEC_FILENAME="${{ inputs.service-name }}.${SPEC_EXT}"
-          cp "$API_SPEC" "specs/${{ inputs.environment }}/$SPEC_FILENAME"
-          echo "✅ Copied API specification: $SPEC_FILENAME"
+        # Copy API specification from artifact or service repo
+        SPEC_FOUND=false
+        
+        if [[ "${{ inputs.use-spec-artifact }}" == "true" ]]; then
+          echo "📦 Using API specification from artifact: ${{ inputs.spec-artifact-name }}"
           
-          # Update API config to reference the correct spec path
-          sed -i "s|specPath:.*|specPath: ./specs/${{ inputs.environment }}/$SPEC_FILENAME|g" \
-            "environments/${{ inputs.environment }}/api-config.yml" || true
+          # Determine source path in artifact
+          if [[ -n "${{ inputs.spec-artifact-path }}" ]]; then
+            ARTIFACT_SPEC="../spec-artifact/${{ inputs.spec-artifact-path }}"
+          else
+            # Find spec file in artifact root
+            ARTIFACT_SPEC=$(find ../spec-artifact -maxdepth 1 \( -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.wsdl" -o -name "*.xml" \) | head -1)
+          fi
+          
+          if [[ -f "$ARTIFACT_SPEC" ]]; then
+            # Determine spec file extension and copy appropriately
+            SPEC_EXT="${ARTIFACT_SPEC##*.}"
+            SPEC_FILENAME="${{ inputs.service-name }}.${SPEC_EXT}"
+            cp "$ARTIFACT_SPEC" "specs/${{ inputs.environment }}/$SPEC_FILENAME"
+            echo "✅ Copied API specification from artifact: $SPEC_FILENAME"
+            SPEC_FOUND=true
+          else
+            echo "❌ API specification not found in artifact: $ARTIFACT_SPEC"
+            echo "Available files in artifact:"
+            find ../spec-artifact -type f | head -10
+          fi
         else
-          echo "❌ API specification file not found: $API_SPEC"
-          echo "Available spec files in service repo:"
-          find ../service-repo -name "*.openapi.*" -o -name "*.wsdl" -o -name "*.xml" | head -10
+          echo "📁 Using API specification from service repository"
+          API_SPEC="../service-repo/${{ inputs.api-spec-path }}"
+          
+          if [[ -f "$API_SPEC" ]]; then
+            # Determine spec file extension and copy appropriately
+            SPEC_EXT="${API_SPEC##*.}"
+            SPEC_FILENAME="${{ inputs.service-name }}.${SPEC_EXT}"
+            cp "$API_SPEC" "specs/${{ inputs.environment }}/$SPEC_FILENAME"
+            echo "✅ Copied API specification from repository: $SPEC_FILENAME"
+            SPEC_FOUND=true
+          else
+            echo "❌ API specification file not found: $API_SPEC"
+            echo "Available spec files in service repo:"
+            find ../service-repo -name "*.openapi.*" -o -name "*.wsdl" -o -name "*.xml" | head -10
+          fi
+        fi
+        
+        # Validate that spec was found and copied
+        if [[ "$SPEC_FOUND" != "true" ]]; then
+          echo "❌ Failed to locate API specification"
+          echo "Use-artifact mode: ${{ inputs.use-spec-artifact }}"
+          echo "Expected artifact path: ${{ inputs.spec-artifact-path }}"
+          echo "Expected repository path: ${{ inputs.api-spec-path }}"
           exit 1
         fi
+        
+        # Update API config to reference the correct spec path
+        sed -i "s|specPath:.*|specPath: ./specs/${{ inputs.environment }}/$SPEC_FILENAME|g" \
+          "environments/${{ inputs.environment }}/api-config.yml" || true
         
     - name: Validate deployment configuration
       working-directory: apim-tooling
@@ -172,6 +235,15 @@ jobs:
         echo "Deployment Mode: ${{ inputs.deployment-mode }}"
         echo "Parallel Deployment: ${{ inputs.parallel-deployment }}"
         echo "Dry Run: ${{ inputs.dry-run }}"
+        echo "Spec Source: ${{ inputs.use-spec-artifact == true && 'Artifact' || 'Repository' }}"
+        if [[ "${{ inputs.use-spec-artifact }}" == "true" ]]; then
+          echo "Artifact Name: ${{ inputs.spec-artifact-name }}"
+          if [[ -n "${{ inputs.spec-artifact-path }}" ]]; then
+            echo "Artifact Path: ${{ inputs.spec-artifact-path }}"
+          fi
+        else
+          echo "Repository Path: ${{ inputs.api-spec-path }}"
+        fi
         echo ""
         
     - name: Check API changes (for sync mode)
@@ -263,6 +335,7 @@ jobs:
         echo "**Service:** ${{ inputs.service-name }}" >> $GITHUB_STEP_SUMMARY
         echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
         echo "**Deployment Mode:** ${{ inputs.deployment-mode }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Spec Source:** ${{ inputs.use-spec-artifact == true && 'Artifact' || 'Repository' }}" >> $GITHUB_STEP_SUMMARY
         echo "**Dry Run:** ${{ inputs.dry-run }}" >> $GITHUB_STEP_SUMMARY
         echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
         echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY

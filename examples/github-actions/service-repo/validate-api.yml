@@ -1,5 +1,8 @@
 # Example GitHub Actions Workflow for Service Repository
 # Copy this file to your service repository at: .github/workflows/validate-api.yml
+#
+# This example demonstrates validation of GENERATED API specifications.
+# It shows how to generate specs during validation and test them before deployment.
 
 name: Validate API Configuration
 
@@ -31,71 +34,127 @@ on:
 env:
   SERVICE_NAME: user-service  # Change this to your service name
   API_CONFIG_PATH: deployment/api-config.yml
-  API_SPEC_PATH: specs/api.openapi.yml
+  # Note: API specs are generated during build, not committed to repo
 
 jobs:
-  # Validate API specification
-  validate-api-spec:
+  # Build and generate API specification for validation
+  build-and-generate-spec:
     runs-on: ubuntu-latest
+    outputs:
+      spec-generated: ${{ steps.generate.outputs.spec-generated }}
+      spec-file-name: ${{ steps.generate.outputs.spec-file-name }}
     steps:
     - uses: actions/checkout@v4
     
-    - name: Check API specification exists
+    - name: Setup build environment
       run: |
-        if [[ -f "${{ env.API_SPEC_PATH }}" ]]; then
-          echo "✅ API specification found: ${{ env.API_SPEC_PATH }}"
+        # Add your build setup here (Node.js, .NET, Java, etc.)
+        echo "Setting up build environment..."
+        
+    - name: Install dependencies
+      run: |
+        # Add your dependency installation here
+        echo "Installing dependencies..."
+        
+    - name: Generate API specification
+      id: generate
+      run: |
+        echo "🔧 Generating API specification for validation..."
+        
+        # Create output directory
+        mkdir -p generated-specs
+        
+        # Generate spec using same approach as deploy workflow
+        # (Copy the generation logic from deploy-api.yml)
+        
+        # Example: Generate a sample OpenAPI spec
+        cat > generated-specs/${{ env.SERVICE_NAME }}.openapi.json << 'EOF'
+        {
+          "openapi": "3.0.3",
+          "info": {
+            "title": "${{ env.SERVICE_NAME }} API",
+            "version": "1.0.0",
+            "description": "Generated API specification for validation"
+          },
+          "paths": {
+            "/health": {
+              "get": {
+                "summary": "Health check",
+                "responses": {
+                  "200": {
+                    "description": "Service is healthy"
+                  }
+                }
+              }
+            },
+            "/api/users": {
+              "get": {
+                "summary": "Get users",
+                "responses": {
+                  "200": {
+                    "description": "List of users"
+                  }
+                }
+              }
+            }
+          }
+        }
+        EOF
+        
+        SPEC_FILE="generated-specs/${{ env.SERVICE_NAME }}.openapi.json"
+        if [[ -f "$SPEC_FILE" ]]; then
+          echo "✅ API specification generated: $SPEC_FILE"
+          echo "spec-generated=true" >> $GITHUB_OUTPUT
+          echo "spec-file-name=${{ env.SERVICE_NAME }}.openapi.json" >> $GITHUB_OUTPUT
         else
-          echo "❌ API specification not found: ${{ env.API_SPEC_PATH }}"
-          echo "Expected API specification at: ${{ env.API_SPEC_PATH }}"
-          echo "Available files:"
-          find . -name "*.openapi.*" -o -name "*.wsdl" -o -name "*.xml" | head -10
+          echo "❌ Failed to generate API specification"
+          echo "spec-generated=false" >> $GITHUB_OUTPUT
           exit 1
         fi
         
-    - name: Validate OpenAPI specification
-      if: endsWith(env.API_SPEC_PATH, '.openapi.yml') || endsWith(env.API_SPEC_PATH, '.openapi.yaml') || endsWith(env.API_SPEC_PATH, '.openapi.json')
-      run: |
-        echo "🔍 Validating OpenAPI specification..."
+    - name: Upload generated specification
+      if: steps.generate.outputs.spec-generated == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: validation-api-specs
+        path: generated-specs/
+        retention-days: 3  # Short retention for validation
         
-        # Install OpenAPI validator (you can customize this based on your preferred tool)
+  # Validate the generated API specification  
+  validate-api-spec:
+    needs: [build-and-generate-spec]
+    if: needs.build-and-generate-spec.outputs.spec-generated == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download generated specification
+      uses: actions/download-artifact@v4
+      with:
+        name: validation-api-specs
+        path: ./specs
+        
+    - name: Validate OpenAPI specification
+      run: |
+        echo "🔍 Validating generated OpenAPI specification..."
+        
+        SPEC_FILE="specs/${{ needs.build-and-generate-spec.outputs.spec-file-name }}"
+        
+        # Install OpenAPI validator
         npm install -g @apidevtools/swagger-cli
         
         # Validate the OpenAPI spec
-        swagger-cli validate "${{ env.API_SPEC_PATH }}"
-        echo "✅ OpenAPI specification is valid"
-        
-    - name: Validate WSDL specification  
-      if: endsWith(env.API_SPEC_PATH, '.wsdl') || endsWith(env.API_SPEC_PATH, '.xml')
-      run: |
-        echo "🔍 Validating WSDL specification..."
-        
-        # Install xmllint for XML validation
-        sudo apt-get update && sudo apt-get install -y libxml2-utils
-        
-        # Validate XML syntax
-        xmllint --noout "${{ env.API_SPEC_PATH }}"
-        
-        # Check for WSDL-specific elements
-        if grep -q "<definitions.*" "${{ env.API_SPEC_PATH }}" && \
-           grep -q "xmlns.*wsdl" "${{ env.API_SPEC_PATH }}" && \
-           grep -qE "<(wsdl:|tns:)?(service|binding|portType)[ >]" "${{ env.API_SPEC_PATH }}"; then
-          echo "✅ WSDL specification appears valid"
-        else
-          echo "❌ File appears to be XML but may not be a valid WSDL"
-          exit 1
-        fi
+        swagger-cli validate "$SPEC_FILE"
+        echo "✅ Generated OpenAPI specification is valid"
         
     - name: Generate API documentation preview
       if: github.event_name == 'pull_request'
       run: |
         echo "📚 Generating API documentation preview..."
         
-        # Generate HTML documentation (customize based on your spec format)
-        if [[ "${{ env.API_SPEC_PATH }}" == *.openapi.* ]]; then
-          # Example with Redoc
-          npx redoc-build "${{ env.API_SPEC_PATH }}" --output api-docs.html
-          echo "API documentation generated: api-docs.html"
-        fi
+        SPEC_FILE="specs/${{ needs.build-and-generate-spec.outputs.spec-file-name }}"
+        
+        # Generate HTML documentation with Redoc
+        npx redoc-build "$SPEC_FILE" --output api-docs.html
+        echo "API documentation generated: api-docs.html"
         
     - name: Upload API documentation
       if: github.event_name == 'pull_request'
@@ -177,24 +236,29 @@ jobs:
           echo "✅ All required fields present in API configuration"
         fi
         
-  # Validate against APIM deployment (dry run)
+  # Validate against APIM deployment (dry run with artifacts)
   validate-apim-deployment:
-    needs: [validate-api-spec, validate-api-config]
-    if: inputs.validate_deployment != false
+    needs: [build-and-generate-spec, validate-api-spec, validate-api-config]
+    if: inputs.validate_deployment != false && needs.build-and-generate-spec.outputs.spec-generated == 'true'
     runs-on: ubuntu-latest
     
     steps:
-    - name: Validate APIM Deployment (Dry Run)
+    - name: Validate APIM Deployment (Dry Run with Artifacts)
       uses: your-org/azure-apim-bicep/.github/workflows/deploy-api.yml@v1
       with:
         environment: dev  # Use dev environment for validation
         service-name: ${{ env.SERVICE_NAME }}
         api-config-path: ${{ env.API_CONFIG_PATH }}
-        api-spec-path: ${{ env.API_SPEC_PATH }}
         config-repo: your-org/infra-config-repo
         deployment-mode: deploy
         dry-run: true  # Important: Only validate, don't actually deploy
         apim-tooling-version: v1
+        
+        # Use artifact-based specification
+        use-spec-artifact: true
+        spec-artifact-name: validation-api-specs
+        spec-artifact-path: ${{ needs.build-and-generate-spec.outputs.spec-file-name }}
+        
       secrets:
         AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
         CONFIG_REPO_TOKEN: ${{ secrets.CONFIG_REPO_TOKEN }}

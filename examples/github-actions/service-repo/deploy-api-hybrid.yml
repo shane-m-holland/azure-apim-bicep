@@ -1,0 +1,289 @@
+# Hybrid API Deployment Example
+# Copy this file to your service repository at: .github/workflows/deploy-api.yml
+#
+# This example demonstrates a HYBRID approach that supports both:
+# 1. Generated API specifications (from build process)
+# 2. Committed API specifications (fallback)
+#
+# The workflow automatically detects which approach to use based on:
+# - Environment variables and configuration
+# - Whether spec generation succeeds
+# - Fallback to committed specs if generation fails
+#
+# Use this approach when:
+# - You're migrating from traditional to artifact-based deployment
+# - Different environments use different approaches
+# - You want maximum flexibility and resilience
+
+name: Deploy API to APIM (Hybrid)
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - 'src/**'
+      - 'specs/**'
+      - 'deployment/**'
+      
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      deployment_mode:
+        description: 'Deployment mode'
+        type: choice
+        options:
+          - sync
+          - deploy
+        default: sync
+      spec_source:
+        description: 'API specification source'
+        type: choice
+        options:
+          - auto      # Auto-detect (try generate, fallback to repository)
+          - generate  # Force generation from code
+          - repository # Force use of committed specs
+        default: auto
+      dry_run:
+        description: 'Perform dry run only'
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-api-${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'prod' || 'dev') }}
+  cancel-in-progress: false
+
+env:
+  SERVICE_NAME: user-service
+  API_CONFIG_PATH: deployment/api-config.yml
+  API_SPEC_PATH: specs/api.openapi.yml  # Fallback committed spec
+  GENERATE_SPECS: true  # Set to false to disable spec generation
+
+jobs:
+  determine-environment:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      should_deploy: ${{ steps.env.outputs.should_deploy }}
+      spec_source: ${{ steps.env.outputs.spec_source }}
+    steps:
+    - id: env
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "environment=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+          echo "spec_source=${{ inputs.spec_source }}" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+          echo "environment=dev" >> $GITHUB_OUTPUT
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+          echo "spec_source=auto" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          echo "environment=prod" >> $GITHUB_OUTPUT
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+          echo "spec_source=auto" >> $GITHUB_OUTPUT
+        else
+          echo "should_deploy=false" >> $GITHUB_OUTPUT
+          echo "spec_source=auto" >> $GITHUB_OUTPUT
+        fi
+        
+  # Build, test, and optionally generate specifications
+  build-and-test:
+    runs-on: ubuntu-latest
+    outputs:
+      spec-generated: ${{ steps.generate.outputs.spec-generated }}
+      spec-file-name: ${{ steps.generate.outputs.spec-file-name }}
+      use-artifacts: ${{ steps.decide.outputs.use-artifacts }}
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup build environment
+      run: |
+        echo "Setting up build environment..."
+        
+    - name: Install dependencies
+      run: |
+        echo "Installing dependencies..."
+        
+    - name: Run tests
+      run: |
+        echo "Running tests..."
+        
+    - name: Attempt to generate API specification
+      id: generate
+      if: env.GENERATE_SPECS == 'true' && (needs.determine-environment.outputs.spec_source == 'auto' || needs.determine-environment.outputs.spec_source == 'generate')
+      continue-on-error: true
+      run: |
+        echo "🔧 Attempting to generate API specification..."
+        
+        mkdir -p generated-specs
+        
+        # Try to generate spec (customize based on your technology)
+        # This example simulates spec generation
+        if [[ "${{ needs.determine-environment.outputs.spec_source }}" == "generate" ]] || \
+           [[ "${{ needs.determine-environment.outputs.spec_source }}" == "auto" ]]; then
+          
+          # Simulate spec generation (replace with your actual generation logic)
+          cat > generated-specs/${{ env.SERVICE_NAME }}.openapi.json << 'EOF'
+        {
+          "openapi": "3.0.3",
+          "info": {
+            "title": "${{ env.SERVICE_NAME }} API",
+            "version": "1.0.0",
+            "description": "Hybrid generated API specification"
+          },
+          "paths": {
+            "/health": {
+              "get": {
+                "summary": "Health check",
+                "responses": {
+                  "200": {
+                    "description": "Service is healthy"
+                  }
+                }
+              }
+            }
+          }
+        }
+        EOF
+          
+          # Verify and validate generated spec
+          SPEC_FILE="generated-specs/${{ env.SERVICE_NAME }}.openapi.json"
+          if [[ -f "$SPEC_FILE" ]]; then
+            npm install -g @apidevtools/swagger-cli
+            if swagger-cli validate "$SPEC_FILE"; then
+              echo "✅ API specification generated and validated: $SPEC_FILE"
+              echo "spec-generated=true" >> $GITHUB_OUTPUT
+              echo "spec-file-name=${{ env.SERVICE_NAME }}.openapi.json" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Generated specification failed validation"
+              echo "spec-generated=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "❌ Failed to generate API specification"
+            echo "spec-generated=false" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "spec-generated=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Validate committed specification (fallback)
+      id: validate-committed
+      if: steps.generate.outputs.spec-generated != 'true'
+      run: |
+        echo "🔍 Checking committed API specification as fallback..."
+        
+        if [[ -f "${{ env.API_SPEC_PATH }}" ]]; then
+          echo "✅ Committed API specification found: ${{ env.API_SPEC_PATH }}"
+          
+          # Validate committed spec
+          npm install -g @apidevtools/swagger-cli
+          swagger-cli validate "${{ env.API_SPEC_PATH }}"
+          echo "✅ Committed specification is valid"
+          echo "committed-spec-valid=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ No committed API specification found: ${{ env.API_SPEC_PATH }}"
+          echo "committed-spec-valid=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+    - name: Decide deployment approach
+      id: decide
+      run: |
+        if [[ "${{ steps.generate.outputs.spec-generated }}" == "true" ]]; then
+          echo "🎯 Using ARTIFACT-based deployment (generated specs)"
+          echo "use-artifacts=true" >> $GITHUB_OUTPUT
+        elif [[ "${{ steps.validate-committed.outputs.committed-spec-valid }}" == "true" ]]; then
+          echo "🎯 Using REPOSITORY-based deployment (committed specs)"
+          echo "use-artifacts=false" >> $GITHUB_OUTPUT
+        else
+          echo "❌ No valid API specification available"
+          exit 1
+        fi
+        
+    - name: Upload generated specification artifact
+      if: steps.generate.outputs.spec-generated == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: api-specs
+        path: generated-specs/
+        retention-days: 7
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: service-artifacts
+        path: |
+          ${{ env.API_CONFIG_PATH }}
+          ${{ steps.decide.outputs.use-artifacts == 'false' && env.API_SPEC_PATH || '' }}
+        retention-days: 7
+        
+  # Validate API configuration
+  validate-api-config:
+    needs: [build-and-test]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Validate API Configuration (Hybrid)
+      uses: your-org/azure-apim-bicep/.github/workflows/validate-config.yml@v1
+      with:
+        environment: dev
+        api-config-path: ${{ env.API_CONFIG_PATH }}
+        api-spec-path: ${{ needs.build-and-test.outputs.use-artifacts == 'true' && needs.build-and-test.outputs.spec-file-name || env.API_SPEC_PATH }}
+        config-repo: your-org/infra-config-repo
+      secrets:
+        CONFIG_REPO_TOKEN: ${{ secrets.CONFIG_REPO_TOKEN }}
+        
+  # Deploy API using appropriate approach
+  deploy-api:
+    needs: [determine-environment, build-and-test, validate-api-config]
+    if: needs.determine-environment.outputs.should_deploy == 'true'
+    
+    uses: your-org/azure-apim-bicep/.github/workflows/deploy-api.yml@v1
+    with:
+      environment: ${{ needs.determine-environment.outputs.environment }}
+      service-name: ${{ env.SERVICE_NAME }}
+      api-config-path: ${{ env.API_CONFIG_PATH }}
+      config-repo: your-org/infra-config-repo
+      deployment-mode: ${{ inputs.deployment_mode || 'sync' }}
+      parallel-deployment: true
+      dry-run: ${{ inputs.dry_run || false }}
+      apim-tooling-version: v1
+      
+      # Conditional: Use artifacts if generated, otherwise repository files
+      use-spec-artifact: ${{ needs.build-and-test.outputs.use-artifacts == 'true' }}
+      spec-artifact-name: ${{ needs.build-and-test.outputs.use-artifacts == 'true' && 'api-specs' || '' }}
+      spec-artifact-path: ${{ needs.build-and-test.outputs.use-artifacts == 'true' && needs.build-and-test.outputs.spec-file-name || '' }}
+      api-spec-path: ${{ needs.build-and-test.outputs.use-artifacts == 'false' && env.API_SPEC_PATH || '' }}
+      
+    secrets:
+      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+      CONFIG_REPO_TOKEN: ${{ secrets.CONFIG_REPO_TOKEN }}
+      
+  # Notify with approach used
+  notify:
+    needs: [determine-environment, build-and-test, deploy-api]
+    if: always() && needs.determine-environment.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Deployment summary
+      run: |
+        echo "## 🔄 Hybrid API Deployment Summary"
+        echo "Service: ${{ env.SERVICE_NAME }}"
+        echo "Environment: ${{ needs.determine-environment.outputs.environment }}"
+        echo "Approach Used: ${{ needs.build-and-test.outputs.use-artifacts == 'true' && 'Artifact-based (Generated)' || 'Repository-based (Committed)' }}"
+        echo "Status: ${{ needs.deploy-api.result }}"
+        echo "Commit: ${{ github.sha }}"
+        
+        if [[ "${{ needs.build-and-test.outputs.use-artifacts }}" == "true" ]]; then
+          echo "✨ Used generated API specification from build process"
+        else
+          echo "📁 Used committed API specification from repository"
+        fi
