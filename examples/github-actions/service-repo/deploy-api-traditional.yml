@@ -1,0 +1,209 @@
+# Traditional Repository-Based API Deployment Example
+# Copy this file to your service repository at: .github/workflows/deploy-api.yml
+#
+# This example demonstrates the TRADITIONAL approach where API specifications
+# are committed to the repository alongside the source code.
+#
+# Use this approach when:
+# - Your API specs are hand-written and maintained separately from code
+# - You want to version control your API specifications directly
+# - Your team prefers explicit spec files in the repository
+#
+# For the modern artifact-based approach, see: deploy-api.yml
+
+name: Deploy API to APIM (Traditional)
+
+on:
+  # Automatic deployment on merges
+  push:
+    branches:
+      - develop      # Deploy to dev environment
+      - main         # Deploy to prod environment
+    paths:
+      - 'src/**'
+      - 'specs/**'   # Important: API specs are in repository
+      - 'deployment/**'
+      
+  # Manual deployment with environment selection
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      deployment_mode:
+        description: 'Deployment mode'
+        type: choice
+        options:
+          - sync    # Deploy only changed APIs (recommended)
+          - deploy  # Deploy all APIs
+        default: sync
+      dry_run:
+        description: 'Perform dry run only'
+        type: boolean
+        default: false
+
+# Prevent concurrent deployments to the same environment
+concurrency:
+  group: deploy-api-${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'prod' || 'dev') }}
+  cancel-in-progress: false
+
+env:
+  SERVICE_NAME: user-service  # Change this to your service name
+  API_CONFIG_PATH: deployment/api-config.yml
+  API_SPEC_PATH: specs/api.openapi.yml  # Committed to repository
+
+jobs:
+  # Determine target environment based on branch or manual input
+  determine-environment:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      should_deploy: ${{ steps.env.outputs.should_deploy }}
+    steps:
+    - id: env
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "environment=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+          echo "environment=dev" >> $GITHUB_OUTPUT
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          echo "environment=prod" >> $GITHUB_OUTPUT
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+        else
+          echo "should_deploy=false" >> $GITHUB_OUTPUT
+        fi
+        
+  # Build and test the service (traditional approach)
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup build environment
+      run: |
+        # Add your build setup here (Node.js, .NET, Java, etc.)
+        echo "Setting up build environment..."
+        
+    - name: Install dependencies
+      run: |
+        # Add your dependency installation here
+        echo "Installing dependencies..."
+        
+    - name: Run tests
+      run: |
+        # Add your test commands here
+        echo "Running tests..."
+        
+    - name: Validate committed API specification
+      run: |
+        # Validate that the committed API spec exists and is valid
+        if [[ -f "${{ env.API_SPEC_PATH }}" ]]; then
+          echo "✅ API specification found: ${{ env.API_SPEC_PATH }}"
+          
+          # Install OpenAPI validator
+          npm install -g @apidevtools/swagger-cli
+          
+          # Validate the OpenAPI spec
+          swagger-cli validate "${{ env.API_SPEC_PATH }}"
+          echo "✅ API specification is valid"
+        else
+          echo "❌ API specification not found: ${{ env.API_SPEC_PATH }}"
+          echo "Available spec files:"
+          find . -name "*.openapi.*" -o -name "*.wsdl" -o -name "*.xml" | head -10
+          exit 1
+        fi
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: service-artifacts
+        path: |
+          ${{ env.API_CONFIG_PATH }}
+          ${{ env.API_SPEC_PATH }}
+        retention-days: 7
+        
+  # Validate API configuration (traditional)
+  validate-api-config:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Validate API Configuration (Traditional)
+      uses: your-org/azure-apim-bicep/.github/workflows/validate-config.yml@v1
+      with:
+        environment: dev  # Use dev for validation
+        api-config-path: ${{ env.API_CONFIG_PATH }}
+        api-spec-path: ${{ env.API_SPEC_PATH }}
+        config-repo: your-org/infra-config-repo
+      secrets:
+        CONFIG_REPO_TOKEN: ${{ secrets.CONFIG_REPO_TOKEN }}
+        
+  # Deploy API to APIM (traditional repository-based approach)
+  deploy-api:
+    needs: [determine-environment, build-and-test, validate-api-config]
+    if: needs.determine-environment.outputs.should_deploy == 'true'
+    
+    uses: your-org/azure-apim-bicep/.github/workflows/deploy-api.yml@v1
+    with:
+      environment: ${{ needs.determine-environment.outputs.environment }}
+      service-name: ${{ env.SERVICE_NAME }}
+      api-config-path: ${{ env.API_CONFIG_PATH }}
+      api-spec-path: ${{ env.API_SPEC_PATH }}  # Traditional: use repository file
+      config-repo: your-org/infra-config-repo
+      deployment-mode: ${{ inputs.deployment_mode || 'sync' }}
+      parallel-deployment: true
+      dry-run: ${{ inputs.dry_run || false }}
+      apim-tooling-version: v1  # Pin to specific version
+      
+      # NOTE: Artifact parameters not needed in traditional approach
+      # use-spec-artifact: false (default)
+      
+    secrets:
+      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+      CONFIG_REPO_TOKEN: ${{ secrets.CONFIG_REPO_TOKEN }}
+      
+  # Post-deployment testing (optional)
+  post-deployment-test:
+    needs: [determine-environment, deploy-api]
+    if: needs.deploy-api.result == 'success' && inputs.dry_run != true
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine-environment.outputs.environment }}-testing
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run integration tests
+      run: |
+        # Add your integration tests here
+        echo "Running post-deployment integration tests..."
+        
+  # Notify deployment result
+  notify:
+    needs: [determine-environment, deploy-api, post-deployment-test]
+    if: always() && needs.determine-environment.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Determine deployment status
+      id: status
+      run: |
+        if [[ "${{ needs.deploy-api.result }}" == "success" ]]; then
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "message=🎉 Traditional API deployment successful" >> $GITHUB_OUTPUT
+        else
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "message=❌ Traditional API deployment failed" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Post notification
+      run: |
+        echo "${{ steps.status.outputs.message }}"
+        echo "Service: ${{ env.SERVICE_NAME }}"
+        echo "Environment: ${{ needs.determine-environment.outputs.environment }}"
+        echo "Approach: Traditional (Repository-based specs)"
+        echo "Commit: ${{ github.sha }}"
