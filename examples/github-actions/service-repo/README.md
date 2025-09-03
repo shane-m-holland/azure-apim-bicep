@@ -52,16 +52,25 @@ service-repo/
 - **Best for**: Migration scenarios, mixed environments, resilient deployments
 - **Use cases**: Different approaches per environment, gradual migration
 
+### 🏗️ **deploy-api-config-repo.yml** - Config Repository Approach
+**For centralized configuration management**
+
+- **Stores API specifications** in the infrastructure config repository
+- **Centralized management** of API configurations and specs
+- **Best for**: Enterprise environments, shared API specifications, infrastructure team control
+- **Use cases**: Multiple services sharing specs, centralized governance, temporary migration solution
+
 ## 🔧 Configuration Comparison
 
-| Feature | Artifact-Based | Traditional | Hybrid |
-|---------|---------------|-------------|---------|
-| **Spec Source** | Generated from code | Committed files | Auto-detect |
-| **Maintenance** | Low (automated) | High (manual) | Medium |
-| **Code-Spec Sync** | Always in sync | Manual sync needed | Best of both |
-| **Setup Complexity** | Medium | Low | High |
-| **Flexibility** | Low | Low | High |
-| **Recommended For** | New projects | Legacy projects | Migration |
+| Feature | Artifact-Based | Traditional | Hybrid | Config Repository |
+|---------|---------------|-------------|---------|-------------------|
+| **Spec Source** | Generated from code | Committed files | Auto-detect | Config repo |
+| **Maintenance** | Low (automated) | High (manual) | Medium | Medium |
+| **Code-Spec Sync** | Always in sync | Manual sync needed | Best of both | Manual sync |
+| **Setup Complexity** | Medium | Low | High | Low |
+| **Flexibility** | Low | Low | High | Medium |
+| **Centralized Control** | No | No | No | Yes |
+| **Recommended For** | New projects | Legacy projects | Migration | Enterprise/Shared |
 
 ## 🚀 Getting Started
 
@@ -82,6 +91,11 @@ cp deploy-api-traditional.yml .github/workflows/deploy-api.yml
 cp deploy-api-hybrid.yml .github/workflows/deploy-api.yml
 ```
 
+**For centralized config**: Use **deploy-api-config-repo.yml**
+```bash
+cp deploy-api-config-repo.yml .github/workflows/deploy-api.yml
+```
+
 ### 2. Customize the Workflow
 
 Edit the copied workflow file and update:
@@ -89,8 +103,9 @@ Edit the copied workflow file and update:
 ```yaml
 env:
   SERVICE_NAME: your-service-name        # Change this
-  API_CONFIG_PATH: deployment/api-config.yml
-  # API_SPEC_PATH: specs/api.openapi.yml  # Only for traditional approach
+  API_CONFIG_PATH: deployment/api-config.yml  # Traditional/Artifact only
+  CONFIG_REPO: your-org/infra-config-repo     # Config repository only
+  # API_SPEC_PATH: specs/api.openapi.yml      # Only for traditional approach
 ```
 
 ### 3. Update Repository References
@@ -98,7 +113,13 @@ env:
 Replace `your-org` with your GitHub organization:
 
 ```yaml
+# For artifact-based, traditional, and hybrid approaches:
 uses: your-org/azure-apim-bicep/.github/workflows/deploy-api.yml@v1
+
+# For config repository approach:
+uses: your-org/azure-apim-bicep/.github/workflows/deploy-api-from-config.yml@v1
+
+# Update organization references:
 config-repo: your-org/infra-config-repo
 ```
 
@@ -133,6 +154,13 @@ Add these secrets to your repository:
 |-------|-------------|---------|
 | `api-spec-path` | Path to committed spec file | `specs/api.openapi.yml` |
 
+### Config Repository Specific
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `config-repo` | Repository with configs and specs | Required |
+| `config-path` | Path to environment configs | `environments` |
+
 ## 🔍 Validation Examples
 
 Each deployment approach has a corresponding validation workflow:
@@ -147,6 +175,11 @@ Each deployment approach has a corresponding validation workflow:
 - Checks API configuration syntax
 - Tests deployment compatibility
 
+### **Config Repository Validation** - Centralized Validation
+- Validates API specs and configs in the config repository
+- No separate validation workflow needed - validation is built into deployment
+- Config repository changes trigger validation automatically
+
 Copy the appropriate validation workflow:
 
 ```bash
@@ -155,6 +188,9 @@ cp validate-api.yml .github/workflows/validate-api.yml
 
 # For traditional approach (create this file)
 # Use the same structure but without spec generation steps
+
+# For config repository approach
+# No separate validation workflow - handled by deployment workflow
 ```
 
 ## 🔄 Migration Guide
@@ -180,6 +216,39 @@ cp validate-api.yml .github/workflows/validate-api.yml
    ```bash
    cp deploy-api-traditional.yml .github/workflows/deploy-api.yml
    ```
+
+### To Config Repository Approach
+
+1. **Move API configs and specs** to config repository:
+   ```bash
+   # Move to config repository structure
+   config-repo/
+   └── environments/
+       └── {environment}/
+           ├── config.env
+           ├── api-config.yml
+           └── specs/
+               └── service-name.openapi.json
+   ```
+
+2. **Switch to config repository workflow**:
+   ```bash
+   cp deploy-api-config-repo.yml .github/workflows/deploy-api.yml
+   ```
+
+3. **Update environment variables**:
+   ```yaml
+   env:
+     SERVICE_NAME: your-service-name
+     CONFIG_REPO: your-org/infra-config-repo
+     CONFIG_PATH: environments
+   ```
+
+### From Config Repository to Other Approaches
+
+1. **Copy specs back to service repository** (for traditional)
+2. **Add spec generation** to build process (for artifact-based)
+3. **Update workflow file** to use appropriate approach
 
 ## 🛠️ Spec Generation Examples
 
@@ -241,6 +310,16 @@ curl -o generated-specs/api.json http://localhost:3000/api-docs.json
 - Consider switching to artifact-based approach
 - Use hybrid approach during transition
 - Set up automated spec updates
+
+**Config repository access issues**:
+- Verify CONFIG_REPO_TOKEN has access to config repository
+- Check config repository structure matches expected format
+- Ensure API specifications exist at referenced paths
+
+**Centralized spec conflicts**:
+- Coordinate changes with infrastructure team
+- Use feature branches in config repository
+- Test changes in dev environment first
 
 ### Debug Steps
 

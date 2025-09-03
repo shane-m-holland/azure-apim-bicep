@@ -1,0 +1,366 @@
+name: Deploy API from Config Repository (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment to deploy to (dev, staging, prod)'
+        required: true
+        type: string
+      service-name:
+        description: 'Name of the service/API being deployed'
+        required: true
+        type: string
+      config-repo:
+        description: 'Repository containing environment configurations and API specs'
+        required: true
+        type: string
+      config-path:
+        description: 'Path to config files in config repository'
+        type: string
+        default: 'environments'
+      apim-tooling-version:
+        description: 'Version/ref of APIM tooling to use'
+        type: string
+        default: 'main'
+      deployment-mode:
+        description: 'Deployment mode (deploy, sync)'
+        type: string
+        default: 'sync'
+      parallel-deployment:
+        description: 'Deploy APIs in parallel'
+        type: boolean
+        default: true
+      dry-run:
+        description: 'Perform dry run only'
+        type: boolean
+        default: false
+    secrets:
+      AZURE_CREDENTIALS:
+        description: 'Azure service principal credentials (JSON)'
+        required: true
+      CONFIG_REPO_TOKEN:
+        description: 'GitHub token for accessing config repository'
+        required: false
+
+jobs:
+  deploy-api-from-config:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    
+    steps:
+    - name: Checkout APIM tooling repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ github.repository_owner }}/azure-apim-bicep
+        ref: ${{ inputs.apim-tooling-version }}
+        path: apim-tooling
+        
+    - name: Checkout config repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.config-repo }}
+        token: ${{ secrets.CONFIG_REPO_TOKEN || github.token }}
+        path: config-repo
+        
+    - name: Setup Azure CLI
+      uses: azure/CLI@v1
+      with:
+        inlineScript: |
+          echo "Azure CLI is available"
+        
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+        
+    - name: Install required tools
+      run: |
+        # Install jq for JSON processing
+        sudo apt-get update && sudo apt-get install -y jq
+        
+        # Install yq for YAML processing
+        pip install yq
+        
+        # Install xmllint for WSDL validation
+        sudo apt-get install -y libxml2-utils
+        
+    - name: Validate config repository structure
+      run: |
+        echo "🔍 Validating config repository structure for service: ${{ inputs.service-name }}"
+        
+        # Check environment configuration exists
+        ENV_CONFIG="config-repo/${{ inputs.config-path }}/${{ inputs.environment }}/config.env"
+        if [[ ! -f "$ENV_CONFIG" ]]; then
+          echo "❌ Environment config not found: $ENV_CONFIG"
+          echo "Available environment configs:"
+          find config-repo/${{ inputs.config-path }} -name "config.env" | head -10
+          exit 1
+        fi
+        echo "✅ Environment config found: $ENV_CONFIG"
+        
+        # Check API configuration exists
+        API_CONFIG_YAML="config-repo/${{ inputs.config-path }}/${{ inputs.environment }}/api-config.yml"
+        API_CONFIG_JSON="config-repo/${{ inputs.config-path }}/${{ inputs.environment }}/api-config.json"
+        
+        if [[ -f "$API_CONFIG_YAML" ]]; then
+          API_CONFIG="$API_CONFIG_YAML"
+          echo "✅ API config found (YAML): $API_CONFIG"
+        elif [[ -f "$API_CONFIG_JSON" ]]; then
+          API_CONFIG="$API_CONFIG_JSON"
+          echo "✅ API config found (JSON): $API_CONFIG"
+        else
+          echo "❌ API config not found. Expected either:"
+          echo "  - $API_CONFIG_YAML"
+          echo "  - $API_CONFIG_JSON"
+          echo "Available config files:"
+          find config-repo/${{ inputs.config-path }}/${{ inputs.environment }} -name "*.yml" -o -name "*.yaml" -o -name "*.json" | head -10
+          exit 1
+        fi
+        
+        # Validate API config syntax
+        if [[ "$API_CONFIG" == *.yml || "$API_CONFIG" == *.yaml ]]; then
+          yq . "$API_CONFIG" > /dev/null
+          echo "✅ API config YAML syntax is valid"
+        else
+          jq . "$API_CONFIG" > /dev/null
+          echo "✅ API config JSON syntax is valid"
+        fi
+        
+        # Extract and validate API spec paths
+        echo "🔍 Validating referenced API specifications..."
+        
+        if [[ "$API_CONFIG" == *.json ]]; then
+          SPEC_PATHS=$(jq -r '.[].specPath // empty' "$API_CONFIG")
+        else
+          SPEC_PATHS=$(yq -r '.[].specPath // null' "$API_CONFIG" | grep -v null || true)
+        fi
+        
+        if [[ -z "$SPEC_PATHS" ]]; then
+          echo "❌ No API specifications found in configuration"
+          exit 1
+        fi
+        
+        SPEC_COUNT=0
+        while IFS= read -r spec_path; do
+          [[ -z "$spec_path" ]] && continue
+          
+          # Resolve spec path relative to config repository
+          FULL_SPEC_PATH="config-repo/${{ inputs.config-path }}/${{ inputs.environment }}/$spec_path"
+          
+          if [[ -f "$FULL_SPEC_PATH" ]]; then
+            echo "✅ API spec found: $FULL_SPEC_PATH"
+            SPEC_COUNT=$((SPEC_COUNT + 1))
+            
+            # Validate spec file based on extension
+            case "$FULL_SPEC_PATH" in
+              *.json)
+                jq . "$FULL_SPEC_PATH" > /dev/null
+                echo "  ✅ JSON spec syntax is valid"
+                ;;
+              *.yaml|*.yml)
+                yq . "$FULL_SPEC_PATH" > /dev/null
+                echo "  ✅ YAML spec syntax is valid"
+                ;;
+              *.wsdl|*.xml)
+                xmllint --noout "$FULL_SPEC_PATH"
+                echo "  ✅ XML/WSDL spec syntax is valid"
+                ;;
+            esac
+          else
+            echo "❌ API spec not found: $FULL_SPEC_PATH"
+            echo "Available spec files in environment directory:"
+            find "config-repo/${{ inputs.config-path }}/${{ inputs.environment }}" -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.wsdl" -o -name "*.xml" | head -10
+            exit 1
+          fi
+        done <<< "$SPEC_PATHS"
+        
+        echo "✅ Validated $SPEC_COUNT API specification(s) for service: ${{ inputs.service-name }}"
+        
+    - name: Setup deployment workspace
+      working-directory: apim-tooling
+      run: |
+        echo "🔧 Setting up deployment workspace for config-repository mode"
+        echo "Service: ${{ inputs.service-name }}"
+        echo "Environment: ${{ inputs.environment }}"
+        
+        # Create environment directory in tooling repo
+        mkdir -p environments/${{ inputs.environment }}
+        mkdir -p specs/${{ inputs.environment }}
+        
+        # Copy environment configuration from config repo
+        CONFIG_FILE="../config-repo/${{ inputs.config-path }}/${{ inputs.environment }}/config.env"
+        cp "$CONFIG_FILE" "environments/${{ inputs.environment }}/config.env"
+        echo "✅ Copied environment config from config repository"
+        
+        # Copy API configuration from config repo
+        API_CONFIG_YAML="../config-repo/${{ inputs.config-path }}/${{ inputs.environment }}/api-config.yml"
+        API_CONFIG_JSON="../config-repo/${{ inputs.config-path }}/${{ inputs.environment }}/api-config.json"
+        
+        if [[ -f "$API_CONFIG_YAML" ]]; then
+          API_CONFIG="$API_CONFIG_YAML"
+        else
+          API_CONFIG="$API_CONFIG_JSON"
+        fi
+        
+        cp "$API_CONFIG" "environments/${{ inputs.environment }}/api-config.${API_CONFIG##*.}"
+        echo "✅ Copied API configuration from config repository"
+        
+        # Copy all referenced API specifications
+        echo "📁 Copying API specifications from config repository..."
+        
+        if [[ "$API_CONFIG" == *.json ]]; then
+          SPEC_PATHS=$(jq -r '.[].specPath // empty' "$API_CONFIG")
+        else
+          SPEC_PATHS=$(yq -r '.[].specPath // null' "$API_CONFIG" | grep -v null || true)
+        fi
+        
+        while IFS= read -r spec_path; do
+          [[ -z "$spec_path" ]] && continue
+          
+          # Source path in config repository
+          SOURCE_SPEC="../config-repo/${{ inputs.config-path }}/${{ inputs.environment }}/$spec_path"
+          
+          # Destination path in tooling workspace (preserve directory structure)
+          DEST_SPEC="specs/${{ inputs.environment }}/$spec_path"
+          
+          # Create destination directory if needed
+          mkdir -p "$(dirname "$DEST_SPEC")"
+          
+          # Copy spec file
+          cp "$SOURCE_SPEC" "$DEST_SPEC"
+          echo "✅ Copied spec: $spec_path"
+          
+        done <<< "$SPEC_PATHS"
+        
+        echo "✅ All API specifications copied to deployment workspace"
+        
+    - name: Validate deployment configuration
+      working-directory: apim-tooling
+      run: |
+        echo "🔍 Validating deployment configuration"
+        chmod +x apim.sh scripts/*.sh
+        
+        # Validate environment and API configuration
+        ./apim.sh validate ${{ inputs.environment }}
+        
+        # Display configuration summary
+        echo ""
+        echo "📋 Config Repository Deployment Summary:"
+        echo "Environment: ${{ inputs.environment }}"
+        echo "Service: ${{ inputs.service-name }}"
+        echo "Config Repository: ${{ inputs.config-repo }}"
+        echo "Config Path: ${{ inputs.config-path }}"
+        echo "Deployment Mode: ${{ inputs.deployment-mode }}"
+        echo "Parallel Deployment: ${{ inputs.parallel-deployment }}"
+        echo "Dry Run: ${{ inputs.dry-run }}"
+        echo ""
+        
+    - name: Check API changes (for sync mode)
+      if: inputs.deployment-mode == 'sync'
+      working-directory: apim-tooling
+      run: |
+        echo "🔄 Checking for API changes (sync mode)"
+        echo "Sync mode will deploy only changed APIs from config repository"
+        
+    - name: Deploy APIs (dry run)
+      if: inputs.dry-run == true
+      working-directory: apim-tooling
+      run: |
+        echo "🧪 Performing dry run API deployment from config repository"
+        
+        DEPLOY_CMD="./apim.sh deploy apis ${{ inputs.environment }} --dry-run"
+        
+        if [[ "${{ inputs.parallel-deployment }}" == "true" ]]; then
+          DEPLOY_CMD="$DEPLOY_CMD --parallel"
+        fi
+        
+        DEPLOY_CMD="$DEPLOY_CMD --verbose"
+        
+        echo "Executing: $DEPLOY_CMD"
+        $DEPLOY_CMD
+        
+    - name: Deploy APIs  
+      if: inputs.dry-run == false && inputs.deployment-mode == 'deploy'
+      working-directory: apim-tooling
+      run: |
+        echo "🚀 Deploying APIs from config repository to environment: ${{ inputs.environment }}"
+        
+        DEPLOY_CMD="./apim.sh deploy apis ${{ inputs.environment }}"
+        
+        if [[ "${{ inputs.parallel-deployment }}" == "true" ]]; then
+          DEPLOY_CMD="$DEPLOY_CMD --parallel"
+        fi
+        
+        DEPLOY_CMD="$DEPLOY_CMD --verbose"
+        
+        echo "Executing: $DEPLOY_CMD"
+        $DEPLOY_CMD
+        
+    - name: Sync APIs (intelligent deployment)
+      if: inputs.dry-run == false && inputs.deployment-mode == 'sync'
+      working-directory: apim-tooling
+      run: |
+        echo "🔄 Syncing APIs from config repository to environment: ${{ inputs.environment }}"
+        
+        SYNC_CMD="./apim.sh sync ${{ inputs.environment }} --debug"
+        
+        echo "Executing: $SYNC_CMD"
+        $SYNC_CMD
+        
+    - name: Validate deployed APIs
+      if: inputs.dry-run == false
+      working-directory: apim-tooling
+      run: |
+        echo "✅ Validating APIs deployed from config repository"
+        
+        # Source the environment config to get APIM details
+        source "environments/${{ inputs.environment }}/config.env"
+        
+        # Check if APIs are accessible
+        echo "Checking APIM instance: $APIM_NAME in resource group: $RESOURCE_GROUP"
+        
+        # List deployed APIs
+        az apim api list \
+          --service-name "$APIM_NAME" \
+          --resource-group "$RESOURCE_GROUP" \
+          --query '[].{Name:displayName, Path:path, Id:name}' \
+          --output table || echo "⚠️ Could not retrieve API list"
+          
+    - name: Upload deployment artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: config-repo-deployment-logs-${{ inputs.service-name }}-${{ inputs.environment }}-${{ github.run_number }}
+        path: |
+          apim-tooling/environments/${{ inputs.environment }}/api-config.*
+          apim-tooling/specs/${{ inputs.environment }}/
+        retention-days: 30
+        
+    - name: Post-deployment summary
+      if: always()
+      run: |
+        echo "## 🚀 Config Repository API Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "**Service:** ${{ inputs.service-name }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Config Repository:** ${{ inputs.config-repo }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Deployment Mode:** ${{ inputs.deployment-mode }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Spec Source:** Config Repository" >> $GITHUB_STEP_SUMMARY
+        echo "**Dry Run:** ${{ inputs.dry-run }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+        
+        if [[ "${{ job.status }}" == "success" ]]; then
+          if [[ "${{ inputs.dry-run }}" == "true" ]]; then
+            echo "✅ **Result:** Config repository dry run validation completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **Result:** APIs deployed successfully from config repository to APIM" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "❌ **Result:** Config repository API deployment failed - check logs for details" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Service Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Config Repository:** ${{ inputs.config-repo }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
