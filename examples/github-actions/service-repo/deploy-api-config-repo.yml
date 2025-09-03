@@ -1,0 +1,232 @@
+# Config Repository API Deployment Example
+# Copy this file to your service repository at: .github/workflows/deploy-api.yml
+#
+# This example demonstrates the CONFIG REPOSITORY approach where API specifications
+# and configurations are stored in the infrastructure config repository.
+#
+# Use this approach when:
+# - API specs and configs are managed centrally by infrastructure team
+# - You want to separate service code from API configuration management
+# - Multiple services share common API specifications
+# - Configuration changes don't require service repository updates
+#
+# For other approaches, see: deploy-api.yml, deploy-api-traditional.yml
+
+name: Deploy API from Config Repository
+
+on:
+  # Automatic deployment on merges
+  push:
+    branches:
+      - develop      # Deploy to dev environment
+      - main         # Deploy to prod environment
+    paths:
+      - 'src/**'     # Only deploy when service code changes
+      
+  # Manual deployment with environment selection
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      deployment_mode:
+        description: 'Deployment mode'
+        type: choice
+        options:
+          - sync    # Deploy only changed APIs (recommended)
+          - deploy  # Deploy all APIs
+        default: sync
+      dry_run:
+        description: 'Perform dry run only'
+        type: boolean
+        default: false
+
+# Prevent concurrent deployments to the same environment
+concurrency:
+  group: deploy-config-api-${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'prod' || 'dev') }}
+  cancel-in-progress: false
+
+env:
+  SERVICE_NAME: user-service  # Change this to your service name
+  CONFIG_REPO: your-org/infra-config-repo  # Your config repository
+  CONFIG_PATH: environments   # Path to environment configs in config repo
+
+jobs:
+  # Determine target environment based on branch or manual input
+  determine-environment:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      should_deploy: ${{ steps.env.outputs.should_deploy }}
+    steps:
+    - id: env
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "environment=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+          echo "environment=dev" >> $GITHUB_OUTPUT
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          echo "environment=prod" >> $GITHUB_OUTPUT
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+        else
+          echo "should_deploy=false" >> $GITHUB_OUTPUT
+        fi
+        
+  # Build and test the service (config repository approach)
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup build environment
+      run: |
+        # Add your build setup here (Node.js, .NET, Java, etc.)
+        echo "Setting up build environment..."
+        
+    - name: Install dependencies
+      run: |
+        # Add your dependency installation here
+        echo "Installing dependencies..."
+        
+    - name: Run tests
+      run: |
+        # Add your test commands here
+        echo "Running tests..."
+        
+    - name: Build service
+      run: |
+        # Add your build commands here
+        echo "Building service..."
+        
+    # Note: No spec generation needed - specs are managed in config repository
+    
+  # Validate config repository has required configurations
+  validate-config-repo:
+    needs: [determine-environment]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Validate Config Repository Structure
+      run: |
+        echo "🔍 Validating config repository structure..."
+        echo "Config Repository: ${{ env.CONFIG_REPO }}"
+        echo "Service: ${{ env.SERVICE_NAME }}"
+        echo "Environment: ${{ needs.determine-environment.outputs.environment }}"
+        echo ""
+        echo "Expected structure in config repository:"
+        echo "  ${{ env.CONFIG_PATH }}/${{ needs.determine-environment.outputs.environment }}/"
+        echo "  ├── config.env                    # Environment configuration"
+        echo "  ├── api-config.yml               # API configuration"
+        echo "  └── specs/                       # API specifications"
+        echo "      ├── ${{ env.SERVICE_NAME }}.openapi.json"
+        echo "      └── ..."
+        echo ""
+        echo "ℹ️  This validation step confirms the expected config repository structure."
+        echo "   The actual validation will be performed by the deployment workflow."
+        
+  # Deploy API using config repository specifications
+  deploy-api:
+    needs: [determine-environment, build-and-test, validate-config-repo]
+    if: needs.determine-environment.outputs.should_deploy == 'true'
+    
+    uses: your-org/azure-apim-bicep/.github/workflows/deploy-api-from-config.yml@v1
+    with:
+      environment: ${{ needs.determine-environment.outputs.environment }}
+      service-name: ${{ env.SERVICE_NAME }}
+      config-repo: ${{ env.CONFIG_REPO }}
+      config-path: ${{ env.CONFIG_PATH }}
+      deployment-mode: ${{ inputs.deployment_mode || 'sync' }}
+      parallel-deployment: true
+      dry-run: ${{ inputs.dry_run || false }}
+      apim-tooling-version: v1  # Pin to specific version
+      
+    secrets:
+      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+      CONFIG_REPO_TOKEN: ${{ secrets.CONFIG_REPO_TOKEN }}
+      
+  # Post-deployment testing (optional)
+  post-deployment-test:
+    needs: [determine-environment, deploy-api]
+    if: needs.deploy-api.result == 'success' && inputs.dry_run != true
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine-environment.outputs.environment }}-testing
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run integration tests
+      run: |
+        # Add your integration tests here
+        echo "Running post-deployment integration tests..."
+        echo "Testing service: ${{ env.SERVICE_NAME }}"
+        echo "Environment: ${{ needs.determine-environment.outputs.environment }}"
+        
+        # Example: Test API endpoints
+        # APIM_BASE_URL="https://your-apim-instance.azure-api.net"
+        # curl -f "$APIM_BASE_URL/${{ env.SERVICE_NAME }}/health" || exit 1
+        
+  # Notify deployment result
+  notify:
+    needs: [determine-environment, deploy-api, post-deployment-test]
+    if: always() && needs.determine-environment.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Determine deployment status
+      id: status
+      run: |
+        if [[ "${{ needs.deploy-api.result }}" == "success" ]]; then
+          if [[ "${{ needs.post-deployment-test.result }}" == "success" || "${{ needs.post-deployment-test.result }}" == "skipped" ]]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "message=🎉 Config repository API deployment successful" >> $GITHUB_OUTPUT
+          else
+            echo "status=warning" >> $GITHUB_OUTPUT  
+            echo "message=⚠️ API deployed from config repo but tests failed" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "message=❌ Config repository API deployment failed" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Post notification
+      run: |
+        echo "${{ steps.status.outputs.message }}"
+        echo "Service: ${{ env.SERVICE_NAME }}"
+        echo "Environment: ${{ needs.determine-environment.outputs.environment }}"
+        echo "Approach: Config Repository (Centralized specs)"
+        echo "Config Repository: ${{ env.CONFIG_REPO }}"
+        echo "Commit: ${{ github.sha }}"
+        
+        # Add your notification logic here (Slack, Teams, email, etc.)
+        # Example Slack webhook:
+        # curl -X POST -H 'Content-type: application/json' \
+        #   --data "{\"text\":\"${{ steps.status.outputs.message }}\\nService: ${{ env.SERVICE_NAME }}\\nEnvironment: ${{ needs.determine-environment.outputs.environment }}\"}" \
+        #   ${{ secrets.SLACK_WEBHOOK_URL }}
+        
+    - name: Create GitHub deployment status
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const deployment = await github.rest.repos.createDeployment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: context.sha,
+            environment: '${{ needs.determine-environment.outputs.environment }}',
+            description: 'APIM API deployment from config repository',
+            auto_merge: false
+          });
+          
+          await github.rest.repos.createDeploymentStatus({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            deployment_id: deployment.data.id,
+            state: '${{ steps.status.outputs.status == 'success' && 'success' || 'failure' }}',
+            description: '${{ steps.status.outputs.message }}',
+            environment_url: 'https://your-apim-instance.azure-api.net/${{ env.SERVICE_NAME }}'
+          });
