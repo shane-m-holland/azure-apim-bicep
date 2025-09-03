@@ -120,8 +120,14 @@ jobs:
         # Install jq for JSON processing
         sudo apt-get update && sudo apt-get install -y jq
         
-        # Install yq for YAML processing
-        pip install yq
+        # Install yq (Go version) for YAML processing
+        YQ_VERSION="v4.44.3"
+        wget -qO /tmp/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+        sudo install /tmp/yq /usr/local/bin/yq
+        
+        # Verify yq installation
+        echo "Installed yq version:"
+        yq --version
         
         # Install xmllint for WSDL validation
         sudo apt-get install -y libxml2-utils
@@ -133,91 +139,73 @@ jobs:
         
         # Create environment directory
         mkdir -p environments/${{ inputs.environment }}
-        mkdir -p specs/${{ inputs.environment }}
+        mkdir -p specs
         
-        # Copy environment configuration from config repo
+        # Copy configuration from config repo if specified
         if [[ "${{ inputs.config-repo }}" != "" ]]; then
           CONFIG_FILE="../config-repo/${{ inputs.config-path }}/${{ inputs.environment }}/config.env"
           if [[ -f "$CONFIG_FILE" ]]; then
             cp "$CONFIG_FILE" "environments/${{ inputs.environment }}/config.env"
-            echo "✅ Copied environment config from config repository"
+            echo "✅ Copied config.env from config repository"
           else
-            echo "❌ Config file not found: $CONFIG_FILE"
-            exit 1
-          fi
-        else
-          echo "⚠️ No config repository specified - using existing config.env"
-        fi
-        
-        # Copy API configuration from service repo
-        API_CONFIG="../service-repo/${{ inputs.api-config-path }}"
-        if [[ -f "$API_CONFIG" ]]; then
-          cp "$API_CONFIG" "environments/${{ inputs.environment }}/api-config.yml"
-          echo "✅ Copied API configuration from service repository"
-        else
-          echo "❌ API config file not found: $API_CONFIG"
-          echo "Available files in service repo:"
-          find ../service-repo -name "*.yml" -o -name "*.yaml" -o -name "*.json" | head -10
-          exit 1
-        fi
-        
-        # Copy API specification from artifact or service repo
-        SPEC_FOUND=false
-        
-        if [[ "${{ inputs.use-spec-artifact }}" == "true" ]]; then
-          echo "📦 Using API specification from artifact: ${{ inputs.spec-artifact-name }}"
-          
-          # Determine source path in artifact
-          if [[ -n "${{ inputs.spec-artifact-path }}" ]]; then
-            ARTIFACT_SPEC="../spec-artifact/${{ inputs.spec-artifact-path }}"
-          else
-            # Find spec file in artifact root
-            ARTIFACT_SPEC=$(find ../spec-artifact -maxdepth 1 \( -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.wsdl" -o -name "*.xml" \) | head -1)
-          fi
-          
-          if [[ -f "$ARTIFACT_SPEC" ]]; then
-            # Determine spec file extension and copy appropriately
-            SPEC_EXT="${ARTIFACT_SPEC##*.}"
-            SPEC_FILENAME="${{ inputs.service-name }}.${SPEC_EXT}"
-            cp "$ARTIFACT_SPEC" "specs/${{ inputs.environment }}/$SPEC_FILENAME"
-            echo "✅ Copied API specification from artifact: $SPEC_FILENAME"
-            SPEC_FOUND=true
-          else
-            echo "❌ API specification not found in artifact: $ARTIFACT_SPEC"
-            echo "Available files in artifact:"
-            find ../spec-artifact -type f | head -10
-          fi
-        else
-          echo "📁 Using API specification from service repository"
-          API_SPEC="../service-repo/${{ inputs.api-spec-path }}"
-          
-          if [[ -f "$API_SPEC" ]]; then
-            # Determine spec file extension and copy appropriately
-            SPEC_EXT="${API_SPEC##*.}"
-            SPEC_FILENAME="${{ inputs.service-name }}.${SPEC_EXT}"
-            cp "$API_SPEC" "specs/${{ inputs.environment }}/$SPEC_FILENAME"
-            echo "✅ Copied API specification from repository: $SPEC_FILENAME"
-            SPEC_FOUND=true
-          else
-            echo "❌ API specification file not found: $API_SPEC"
-            echo "Available spec files in service repo:"
-            find ../service-repo -name "*.openapi.*" -o -name "*.wsdl" -o -name "*.xml" | head -10
+            echo "⚠️ Config file not found: $CONFIG_FILE"
+            echo "Available environments in config repo:"
+            ls -la ../config-repo/${{ inputs.config-path }}/ 2>/dev/null || echo "Config path not found"
+            # Don't fail here - the environment might not exist yet
           fi
         fi
         
-        # Validate that spec was found and copied
-        if [[ "$SPEC_FOUND" != "true" ]]; then
-          echo "❌ Failed to locate API specification"
-          echo "Use-artifact mode: ${{ inputs.use-spec-artifact }}"
-          echo "Expected artifact path: ${{ inputs.spec-artifact-path }}"
-          echo "Expected repository path: ${{ inputs.api-spec-path }}"
-          exit 1
+        # Copy API configuration if specified (for service repo validation)
+        if [[ "${{ inputs.api-config-path }}" != "" ]]; then
+          API_CONFIG="../service-repo/${{ inputs.api-config-path }}"
+          if [[ -f "$API_CONFIG" ]]; then
+            cp "$API_CONFIG" "environments/${{ inputs.environment }}/api-config.yml"
+            echo "✅ Copied API configuration for validation"
+            
+            # Copy API specification if specified (traditional approach)
+            if [[ "${{ inputs.api-spec-path }}" != "" ]]; then
+              API_SPEC="../service-repo/${{ inputs.api-spec-path }}"
+              if [[ -f "$API_SPEC" ]]; then
+                mkdir -p specs
+                SPEC_EXT="${API_SPEC##*.}"
+                cp "$API_SPEC" "specs/api-spec.${SPEC_EXT}"
+                echo "✅ Copied API specification for validation"
+                
+                # Update API config to reference the copied spec
+                sed -i "s|specPath:.*|specPath: ./specs/api-spec.${SPEC_EXT}|g" \
+                  "environments/${{ inputs.environment }}/api-config.yml" || true
+              else
+                echo "⚠️ API specification not found: $API_SPEC"
+              fi
+            else
+              # Check for artifact-based specifications (artifact-based approach)
+              if [[ -d "../spec-artifacts" ]]; then
+                echo "📦 Found API specification artifacts"
+                
+                # Copy all specs from artifacts to specs directory
+                cp -r ../spec-artifacts/* "specs/" 2>/dev/null || true
+                
+                SPEC_COUNT=$(find "specs" -name "*.json" -o -name "*.yaml" -o -name "*.yml" | wc -l)
+                if [[ $SPEC_COUNT -gt 0 ]]; then
+                  echo "✅ Copied $SPEC_COUNT API specification(s) from artifacts"
+                  
+                  # Find the main spec file and update API config if needed
+                  MAIN_SPEC=$(find "specs/" -name "*.openapi.json" -o -name "*.openapi.yaml" -o -name "*.openapi.yml" | head -1)
+                  if [[ -n "$MAIN_SPEC" ]]; then
+                    RELATIVE_SPEC_PATH="./specs/$(basename "$MAIN_SPEC")"
+                    sed -i "s|specPath:.*|specPath: $RELATIVE_SPEC_PATH|g" \
+                      "environments/${{ inputs.environment }}/api-config.yml" || true
+                    echo "Updated API config to reference: $RELATIVE_SPEC_PATH"
+                  fi
+                else
+                  echo "⚠️ No API specifications found in artifacts"
+                fi
+              fi
+            fi
+          else
+            echo "⚠️ API configuration not found: $API_CONFIG"
+          fi
         fi
-        
-        # Update API config to reference the correct spec path
-        sed -i "s|specPath:.*|specPath: ./specs/${{ inputs.environment }}/$SPEC_FILENAME|g" \
-          "environments/${{ inputs.environment }}/api-config.yml" || true
-        
     - name: Validate deployment configuration
       working-directory: apim-tooling
       run: |
