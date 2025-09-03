@@ -147,22 +147,47 @@ jobs:
         
     - name: Generate API documentation preview
       if: github.event_name == 'pull_request'
+      continue-on-error: true  # Don't fail validation if docs generation fails
       run: |
         echo "📚 Generating API documentation preview..."
         
         SPEC_FILE="specs/${{ needs.build-and-generate-spec.outputs.spec-file-name }}"
         
-        # Generate HTML documentation with Redoc
-        npx redoc-build "$SPEC_FILE" --output api-docs.html
-        echo "API documentation generated: api-docs.html"
+        # Generate HTML documentation with Redocly CLI (modern approach)
+        if npx @redocly/cli build-docs "$SPEC_FILE" --output api-docs.html 2>/dev/null; then
+          echo "✅ API documentation generated with @redocly/cli: api-docs.html"
+        else
+          echo "⚠️ @redocly/cli failed, trying legacy redoc-cli..."
+          # Fallback to legacy redoc-cli if available
+          if npx redoc-cli build "$SPEC_FILE" --output api-docs.html 2>/dev/null; then
+            echo "✅ API documentation generated with redoc-cli: api-docs.html"
+          else
+            echo "❌ Failed to generate API documentation with both @redocly/cli and redoc-cli"
+            echo "Creating placeholder documentation file..."
+            cat > api-docs.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head><title>API Documentation</title></head>
+<body>
+  <h1>API Documentation</h1>
+  <p>Documentation generation failed. Please check the OpenAPI specification.</p>
+  <p>Spec file: $SPEC_FILE</p>
+</body>
+</html>
+EOF
+            echo "📄 Placeholder documentation created: api-docs.html"
+          fi
+        fi
         
     - name: Upload API documentation
       if: github.event_name == 'pull_request'
       uses: actions/upload-artifact@v4
+      continue-on-error: true  # Don't fail if upload fails
       with:
         name: api-documentation-${{ github.event.pull_request.number }}
         path: api-docs.html
         retention-days: 7
+        if-no-files-found: warn  # Warn if documentation file not found
         
   # Validate API configuration
   validate-api-config:
@@ -184,11 +209,13 @@ jobs:
     - name: Validate YAML syntax
       if: endsWith(env.API_CONFIG_PATH, '.yml') || endsWith(env.API_CONFIG_PATH, '.yaml')
       run: |
-        # Install yq for YAML validation
-        pip install yq
+        # Install yq (Go version) for YAML validation
+        YQ_VERSION="v4.44.3"
+        wget -qO /tmp/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+        sudo install /tmp/yq /usr/local/bin/yq
         
         # Validate YAML syntax
-        yq . "${{ env.API_CONFIG_PATH }}" > /dev/null
+        yq eval '.' "${{ env.API_CONFIG_PATH }}" > /dev/null
         echo "✅ API configuration YAML syntax is valid"
         
     - name: Validate JSON syntax
@@ -214,7 +241,7 @@ jobs:
               MISSING_FIELDS+=("$field")
             fi
           else
-            if ! yq -e ".[0].$field" "$CONFIG_FILE" >/dev/null 2>&1; then
+            if ! yq eval -e ".[0].$field" "$CONFIG_FILE" >/dev/null 2>&1; then
               MISSING_FIELDS+=("$field")
             fi
           fi

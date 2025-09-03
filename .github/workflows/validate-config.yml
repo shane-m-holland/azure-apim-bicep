@@ -78,6 +78,14 @@ jobs:
         repository: ${{ github.repository }}
         path: service-repo
         
+    - name: Download API specification artifacts (if available)
+      if: inputs.api-config-path != '' && inputs.api-spec-path == ''
+      uses: actions/download-artifact@v4
+      continue-on-error: true  # Don't fail if artifacts don't exist
+      with:
+        name: api-specs
+        path: ./spec-artifacts
+        
     - name: Setup Azure CLI
       if: inputs.validate-azure-resources == true
       uses: azure/CLI@v1
@@ -118,8 +126,14 @@ jobs:
         # Install jq for JSON processing
         sudo apt-get update && sudo apt-get install -y jq
         
-        # Install yq for YAML processing
-        pip install yq
+        # Install yq (Go version) for YAML processing
+        YQ_VERSION="v4.44.3"
+        wget -qO /tmp/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+        sudo install /tmp/yq /usr/local/bin/yq
+        
+        # Verify yq installation
+        echo "Installed yq version:"
+        yq --version
         
         # Install xmllint for WSDL validation
         sudo apt-get install -y libxml2-utils
@@ -134,6 +148,9 @@ jobs:
         
         # Create environment directory
         mkdir -p environments/${{ inputs.environment }}
+        
+        # Create specs directory for artifact-based workflows
+        mkdir -p specs/${{ inputs.environment }}
         
         # Copy configuration from config repo if specified
         if [[ "${{ inputs.config-repo }}" != "" ]]; then
@@ -156,7 +173,7 @@ jobs:
             cp "$API_CONFIG" "environments/${{ inputs.environment }}/api-config.yml"
             echo "✅ Copied API configuration for validation"
             
-            # Copy API specification if specified
+            # Copy API specification if specified (traditional approach)
             if [[ "${{ inputs.api-spec-path }}" != "" ]]; then
               API_SPEC="../service-repo/${{ inputs.api-spec-path }}"
               if [[ -f "$API_SPEC" ]]; then
@@ -170,6 +187,30 @@ jobs:
                   "environments/${{ inputs.environment }}/api-config.yml" || true
               else
                 echo "⚠️ API specification not found: $API_SPEC"
+              fi
+            else
+              # Check for artifact-based specifications (artifact-based approach)
+              if [[ -d "../spec-artifacts" ]]; then
+                echo "📦 Found API specification artifacts"
+                
+                # Copy all specs from artifacts to specs directory
+                cp -r ../spec-artifacts/* "specs/${{ inputs.environment }}/" 2>/dev/null || true
+                
+                SPEC_COUNT=$(find "specs/${{ inputs.environment }}" -name "*.json" -o -name "*.yaml" -o -name "*.yml" | wc -l)
+                if [[ $SPEC_COUNT -gt 0 ]]; then
+                  echo "✅ Copied $SPEC_COUNT API specification(s) from artifacts"
+                  
+                  # Find the main spec file and update API config if needed
+                  MAIN_SPEC=$(find "specs/${{ inputs.environment }}" -name "*.openapi.json" -o -name "*.openapi.yaml" -o -name "*.openapi.yml" | head -1)
+                  if [[ -n "$MAIN_SPEC" ]]; then
+                    RELATIVE_SPEC_PATH="./specs/${{ inputs.environment }}/$(basename "$MAIN_SPEC")"
+                    sed -i "s|specPath:.*|specPath: $RELATIVE_SPEC_PATH|g" \
+                      "environments/${{ inputs.environment }}/api-config.yml" || true
+                    echo "Updated API config to reference: $RELATIVE_SPEC_PATH"
+                  fi
+                else
+                  echo "⚠️ No API specifications found in artifacts"
+                fi
               fi
             fi
           else
@@ -206,6 +247,16 @@ jobs:
         echo "🔍 Validating configuration for environment: ${{ inputs.environment }}"
         chmod +x apim.sh scripts/*.sh
         
+        # Debug: Show directory structure and yq version
+        echo "=== Debug Information ==="
+        echo "Current directory: $(pwd)"
+        echo "yq version: $(yq --version)"
+        echo "Environment directory contents:"
+        ls -la "environments/${{ inputs.environment }}/" 2>/dev/null || echo "Environment directory not found"
+        echo "Specs directory contents:"
+        ls -la "specs/" 2>/dev/null || echo "Specs directory not found"
+        echo "=========================="
+        
         # Check if environment directory exists and has config
         if [[ ! -d "environments/${{ inputs.environment }}" ]]; then
           echo "⚠️ Environment directory does not exist: ${{ inputs.environment }}"
@@ -217,6 +268,18 @@ jobs:
         if [[ -f "environments/${{ inputs.environment }}/config.env" ]]; then
           echo "Running comprehensive validation..."
           
+          # Debug: Check API config if present
+          if [[ -f "environments/${{ inputs.environment }}/api-config.yml" ]]; then
+            echo "=== API Config Debug ==="
+            echo "API config file exists"
+            echo "File size: $(stat -c%s "environments/${{ inputs.environment }}/api-config.yml" 2>/dev/null || echo "unknown") bytes"
+            echo "First 5 lines:"
+            head -5 "environments/${{ inputs.environment }}/api-config.yml" 2>/dev/null || echo "Cannot read file"
+            echo "Type detection test:"
+            yq eval 'type' "environments/${{ inputs.environment }}/api-config.yml" 2>/dev/null || echo "yq type detection failed"
+            echo "======================="
+          fi
+          
           # Build validation command with infra-only flag if enabled
           VALIDATION_CMD="./apim.sh validate ${{ inputs.environment }}"
           if [[ "${{ inputs.infra-only-validation }}" == "true" ]]; then
@@ -226,6 +289,11 @@ jobs:
           
           $VALIDATION_CMD || {
             echo "❌ Configuration validation failed for environment: ${{ inputs.environment }}"
+            echo "=== Post-failure Debug ==="
+            echo "Available files in environment directory:"
+            find "environments/${{ inputs.environment }}" -type f 2>/dev/null || echo "No files found"
+            echo "Available files in specs directory:"  
+            find "specs/" -type f 2>/dev/null || echo "No specs found"
             exit 1
           }
         else
