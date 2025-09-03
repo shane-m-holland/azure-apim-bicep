@@ -18,7 +18,7 @@ on:
       api-spec-path:
         description: 'Path to API specification file in service repository'  
         type: string
-        default: 'specs/api.openapi.yml'
+        default: ''
       config-repo:
         description: 'Repository containing environment configurations'
         type: string
