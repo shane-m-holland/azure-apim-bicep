@@ -1,5 +1,10 @@
 name: Deploy API from Config Repository (Reusable)
 
+# Required permissions for this workflow
+permissions:
+  contents: read          # Read repository contents
+  deployments: write      # Create deployment status
+
 on:
   workflow_call:
     inputs:
