@@ -79,8 +79,14 @@ jobs:
         # Install jq for JSON processing
         sudo apt-get update && sudo apt-get install -y jq
         
-        # Install yq for YAML processing
-        pip install yq
+        # Install yq (Go version) for YAML processing
+        YQ_VERSION="v4.44.3"
+        wget -qO /tmp/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+        sudo install /tmp/yq /usr/local/bin/yq
+        
+        # Verify yq installation
+        echo "Installed yq version:"
+        yq --version
         
         # Install xmllint for WSDL validation
         sudo apt-get install -y libxml2-utils
@@ -120,11 +126,25 @@ jobs:
         
         # Validate API config syntax
         if [[ "$API_CONFIG" == *.yml || "$API_CONFIG" == *.yaml ]]; then
-          yq . "$API_CONFIG" > /dev/null
-          echo "✅ API config YAML syntax is valid"
+          echo "🔍 Validating YAML syntax with yq..."
+          if yq eval '.' "$API_CONFIG" >/dev/null 2>&1; then
+            echo "✅ API config YAML syntax is valid"
+          else
+            echo "❌ API config YAML syntax is invalid"
+            echo "File contents preview:"
+            head -20 "$API_CONFIG"
+            exit 1
+          fi
         else
-          jq . "$API_CONFIG" > /dev/null
-          echo "✅ API config JSON syntax is valid"
+          echo "🔍 Validating JSON syntax with jq..."
+          if jq . "$API_CONFIG" >/dev/null 2>&1; then
+            echo "✅ API config JSON syntax is valid"
+          else
+            echo "❌ API config JSON syntax is invalid"
+            echo "File contents preview:"
+            head -20 "$API_CONFIG"
+            exit 1
+          fi
         fi
         
         # Extract and validate API spec paths
@@ -133,7 +153,7 @@ jobs:
         if [[ "$API_CONFIG" == *.json ]]; then
           SPEC_PATHS=$(jq -r '.[].specPath // empty' "$API_CONFIG")
         else
-          SPEC_PATHS=$(yq -r '.[].specPath // null' "$API_CONFIG" | grep -v null || true)
+          SPEC_PATHS=$(yq eval '.[].specPath // null' "$API_CONFIG" | grep -v null || true)
         fi
         
         if [[ -z "$SPEC_PATHS" ]]; then
@@ -159,7 +179,7 @@ jobs:
                 echo "  ✅ JSON spec syntax is valid"
                 ;;
               *.yaml|*.yml)
-                yq . "$FULL_SPEC_PATH" > /dev/null
+                yq eval '.' "$FULL_SPEC_PATH" >/dev/null 2>&1
                 echo "  ✅ YAML spec syntax is valid"
                 ;;
               *.wsdl|*.xml)
@@ -212,7 +232,7 @@ jobs:
         if [[ "$API_CONFIG" == *.json ]]; then
           SPEC_PATHS=$(jq -r '.[].specPath // empty' "$API_CONFIG")
         else
-          SPEC_PATHS=$(yq -r '.[].specPath // null' "$API_CONFIG" | grep -v null || true)
+          SPEC_PATHS=$(yq eval '.[].specPath // null' "$API_CONFIG" | grep -v null || true)
         fi
         
         while IFS= read -r spec_path; do
@@ -240,6 +260,15 @@ jobs:
       run: |
         echo "🔍 Validating deployment configuration"
         chmod +x apim.sh scripts/*.sh
+        
+        # Debug: Show current directory and files
+        echo "Current directory: $(pwd)"
+        echo "Environment directory contents:"
+        ls -la "environments/${{ inputs.environment }}/" || echo "Environment directory not found"
+        
+        # Debug: Show yq version
+        echo "yq version being used:"
+        yq --version
         
         # Validate environment and API configuration
         ./apim.sh validate ${{ inputs.environment }}
