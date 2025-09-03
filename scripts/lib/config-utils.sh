@@ -100,7 +100,14 @@ validate_config_syntax() {
             ;;
         "yaml")
             if command -v yq &> /dev/null; then
-                yq eval '.' "$file_path" >/dev/null 2>&1
+                # Detect yq version and use appropriate syntax
+                if yq --version 2>/dev/null | grep -q "mikefarah/yq"; then
+                    # Go yq v4+ (mikefarah/yq)
+                    yq eval '.' "$file_path" >/dev/null 2>&1
+                else
+                    # Python yq or other version - try alternative syntax
+                    yq . "$file_path" >/dev/null 2>&1 || yq eval '.' "$file_path" >/dev/null 2>&1
+                fi
             else
                 echo "yq is required for YAML validation" >&2
                 return 1
