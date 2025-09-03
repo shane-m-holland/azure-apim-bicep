@@ -179,11 +179,11 @@ jobs:
               fi
             else
               # Check for artifact-based specifications (artifact-based approach)
-              if [[ -d "../spec-artifacts" ]]; then
+              if [[ -d "../spec-artifact" ]]; then
                 echo "📦 Found API specification artifacts"
                 
                 # Copy all specs from artifacts to specs directory
-                cp -r ../spec-artifacts/* "specs/" 2>/dev/null || true
+                cp -r ../spec-artifact/* "specs/" 2>/dev/null || true
                 
                 SPEC_COUNT=$(find "specs" -name "*.json" -o -name "*.yaml" -o -name "*.yml" | wc -l)
                 if [[ $SPEC_COUNT -gt 0 ]]; then
