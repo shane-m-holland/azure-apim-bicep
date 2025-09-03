@@ -146,7 +146,7 @@ jobs:
           [[ -z "$spec_path" ]] && continue
           
           # Resolve spec path relative to config repository
-          FULL_SPEC_PATH="config-repo/${{ inputs.config-path }}/${{ inputs.environment }}/$spec_path"
+          FULL_SPEC_PATH="config-repo/$spec_path"
           
           if [[ -f "$FULL_SPEC_PATH" ]]; then
             echo "✅ API spec found: $FULL_SPEC_PATH"
@@ -169,8 +169,8 @@ jobs:
             esac
           else
             echo "❌ API spec not found: $FULL_SPEC_PATH"
-            echo "Available spec files in environment directory:"
-            find "config-repo/${{ inputs.config-path }}/${{ inputs.environment }}" -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.wsdl" -o -name "*.xml" | head -10
+            echo "Available spec files in directory:"
+            find "config-repo/" -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.wsdl" -o -name "*.xml" | head -10
             exit 1
           fi
         done <<< "$SPEC_PATHS"
@@ -219,10 +219,10 @@ jobs:
           [[ -z "$spec_path" ]] && continue
           
           # Source path in config repository
-          SOURCE_SPEC="../config-repo/${{ inputs.config-path }}/${{ inputs.environment }}/$spec_path"
+          SOURCE_SPEC="../config-repo/$spec_path"
           
           # Destination path in tooling workspace (preserve directory structure)
-          DEST_SPEC="specs/${{ inputs.environment }}/$spec_path"
+          DEST_SPEC="$spec_path"
           
           # Create destination directory if needed
           mkdir -p "$(dirname "$DEST_SPEC")"
