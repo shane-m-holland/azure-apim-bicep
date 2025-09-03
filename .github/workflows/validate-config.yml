@@ -150,7 +150,7 @@ jobs:
         mkdir -p environments/${{ inputs.environment }}
         
         # Create specs directory for artifact-based workflows
-        mkdir -p specs/${{ inputs.environment }}
+        mkdir -p specs
         
         # Copy configuration from config repo if specified
         if [[ "${{ inputs.config-repo }}" != "" ]]; then
@@ -177,13 +177,13 @@ jobs:
             if [[ "${{ inputs.api-spec-path }}" != "" ]]; then
               API_SPEC="../service-repo/${{ inputs.api-spec-path }}"
               if [[ -f "$API_SPEC" ]]; then
-                mkdir -p specs/${{ inputs.environment }}
+                mkdir -p specs
                 SPEC_EXT="${API_SPEC##*.}"
-                cp "$API_SPEC" "specs/${{ inputs.environment }}/api-spec.${SPEC_EXT}"
+                cp "$API_SPEC" "specs/api-spec.${SPEC_EXT}"
                 echo "✅ Copied API specification for validation"
                 
                 # Update API config to reference the copied spec
-                sed -i "s|specPath:.*|specPath: ./specs/${{ inputs.environment }}/api-spec.${SPEC_EXT}|g" \
+                sed -i "s|specPath:.*|specPath: ./specs/api-spec.${SPEC_EXT}|g" \
                   "environments/${{ inputs.environment }}/api-config.yml" || true
               else
                 echo "⚠️ API specification not found: $API_SPEC"
@@ -194,16 +194,16 @@ jobs:
                 echo "📦 Found API specification artifacts"
                 
                 # Copy all specs from artifacts to specs directory
-                cp -r ../spec-artifacts/* "specs/${{ inputs.environment }}/" 2>/dev/null || true
+                cp -r ../spec-artifacts/* "specs/" 2>/dev/null || true
                 
-                SPEC_COUNT=$(find "specs/${{ inputs.environment }}" -name "*.json" -o -name "*.yaml" -o -name "*.yml" | wc -l)
+                SPEC_COUNT=$(find "specs" -name "*.json" -o -name "*.yaml" -o -name "*.yml" | wc -l)
                 if [[ $SPEC_COUNT -gt 0 ]]; then
                   echo "✅ Copied $SPEC_COUNT API specification(s) from artifacts"
                   
                   # Find the main spec file and update API config if needed
-                  MAIN_SPEC=$(find "specs/${{ inputs.environment }}" -name "*.openapi.json" -o -name "*.openapi.yaml" -o -name "*.openapi.yml" | head -1)
+                  MAIN_SPEC=$(find "specs/" -name "*.openapi.json" -o -name "*.openapi.yaml" -o -name "*.openapi.yml" | head -1)
                   if [[ -n "$MAIN_SPEC" ]]; then
-                    RELATIVE_SPEC_PATH="./specs/${{ inputs.environment }}/$(basename "$MAIN_SPEC")"
+                    RELATIVE_SPEC_PATH="./specs/$(basename "$MAIN_SPEC")"
                     sed -i "s|specPath:.*|specPath: $RELATIVE_SPEC_PATH|g" \
                       "environments/${{ inputs.environment }}/api-config.yml" || true
                     echo "Updated API config to reference: $RELATIVE_SPEC_PATH"
