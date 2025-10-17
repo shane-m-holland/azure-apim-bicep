@@ -22,6 +22,12 @@ param subnetName string
 @description('CIDR block for the subnet (e.g., 10.0.0.0/24)')
 param subnetCidr string
 
+@description('APIM SKU name (used to determine if subnet delegation is needed)')
+param apimSkuName string
+
+// Determine if this is a V2 SKU that requires subnet delegation
+var isV2Sku = contains(['BasicV2', 'StandardV2', 'PremiumV2'], apimSkuName)
+
 // -------------------------------------------
 // Create Virtual Network with a single subnet
 // -------------------------------------------
@@ -57,6 +63,16 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
           networkSecurityGroup: {
             id: nsgResourceId
           }
+
+          // V2 SKUs require subnet delegation to Microsoft.Web/serverFarms
+          delegations: isV2Sku ? [
+            {
+              name: 'apim-delegation'
+              properties: {
+                serviceName: 'Microsoft.Web/serverFarms'
+              }
+            }
+          ] : []
 
           // Disable policies for private endpoint access to allow direct connections
           privateEndpointNetworkPolicies: 'Disabled'

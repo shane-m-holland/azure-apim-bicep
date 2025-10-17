@@ -26,6 +26,11 @@ param vnetResourceId string
 @description('Name of the subnet within the VNET to connect APIM to')
 param subnetName string
 
+// Determine if VNet integration is supported for this SKU
+// Classic SKUs (Developer, Basic, Standard) do not support VNet integration
+// Only Premium, BasicV2, StandardV2, and PremiumV2 support VNet integration
+var supportsVnetIntegration = contains(['Premium', 'BasicV2', 'StandardV2', 'PremiumV2'], skuName)
+
 resource apim 'Microsoft.ApiManagement/service@2024-06-01-preview' = {
   name: apimName
   location: location
@@ -54,10 +59,10 @@ resource apim 'Microsoft.ApiManagement/service@2024-06-01-preview' = {
       }
     ]
 
-    // Attach APIM to a subnet in the VNET
-    virtualNetworkConfiguration: {
+    // Attach APIM to a subnet in the VNET (only if SKU supports it)
+    virtualNetworkConfiguration: supportsVnetIntegration ? {
       subnetResourceId: '${vnetResourceId}/subnets/${subnetName}'
-    }
+    } : null
 
     // Harden security by disabling legacy protocols and ciphers
     customProperties: {
@@ -71,14 +76,14 @@ resource apim 'Microsoft.ApiManagement/service@2024-06-01-preview' = {
       'Microsoft.WindowsAzure.ApiManagement.Gateway.Protocols.Server.Http2': 'False'
     }
 
-    // Indicates VNET integration using external mode
-    virtualNetworkType: 'External'
+    // Indicates VNET integration using external mode (only if SKU supports it)
+    virtualNetworkType: supportsVnetIntegration ? 'External' : 'None'
 
     // Ensures the gateway is enabled to handle traffic
     disableGateway: false
 
     // Not supported in VNET External mode
-    natGatewayState: 'Unsupported'
+    natGatewayState: supportsVnetIntegration ? 'Unsupported' : 'Disabled'
 
     // No specific API version constraint applied
     apiVersionConstraint: {}

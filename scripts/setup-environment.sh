@@ -253,23 +253,6 @@ esac
 
 SKU_CAPACITY=$(read_input "APIM capacity" "$DEFAULT_CAPACITY" "^[0-9]+$")
 
-# VNet integration guidance based on selected SKU
-echo ""
-case "$SKU_NAME" in
-    "Developer"|"Basic"|"Standard")
-        if [[ "$USE_EXISTING_VNET" == "true" ]] || [[ -n "$VNET_NAME" && "$VNET_NAME" != "none" ]]; then
-            warn "⚠️  VNet Integration Notice:"
-            echo "   Selected SKU ($SKU_NAME) does not support VNet integration."
-            echo "   Consider using BasicV2/StandardV2 for VNet integration, or Premium for classic SKU."
-        fi
-        ;;
-    "BasicV2"|"StandardV2"|"Premium"|"PremiumV2")
-        if [[ "$USE_EXISTING_VNET" == "true" ]] || [[ -n "$VNET_NAME" && "$VNET_NAME" != "none" ]]; then
-            success "✅ VNet Integration: Selected SKU ($SKU_NAME) supports VNet integration"
-        fi
-        ;;
-esac
-
 header "👤 Publisher Information"
 
 info "This information will be displayed in the developer portal and used for notifications."
@@ -390,7 +373,7 @@ if [[ $vnet_reuse =~ ^[Yy]$ ]]; then
     if [[ $subnet_reuse =~ ^[Yy]$ ]]; then
         USE_EXISTING_SUBNET="true"
         CREATE_NEW_SUBNET_IN_EXISTING_VNET="false"
-        
+
         info "Current subnet name: $SUBNET_NAME"
         echo -n "Use current subnet name or specify different name? (current/different): "
         read -r subnet_choice
@@ -398,6 +381,23 @@ if [[ $vnet_reuse =~ ^[Yy]$ ]]; then
             SUBNET_NAME=$(read_input "Existing subnet name")
         fi
         success "Will reuse existing subnet: $SUBNET_NAME"
+
+        # Warn about V2 SKU delegation requirement
+        if [[ "$SKU_NAME" =~ V2$ ]]; then
+            echo ""
+            warning "⚠️  Important: V2 SKU Subnet Delegation Required!"
+            echo "   Your selected SKU ($SKU_NAME) requires the existing subnet to be"
+            echo "   delegated to 'Microsoft.Web/serverFarms' for VNet integration."
+            echo ""
+            echo "   If the subnet is not already delegated, run this command before deployment:"
+            echo "   az network vnet subnet update \\"
+            echo "     --resource-group <vnet-resource-group> \\"
+            echo "     --vnet-name $VNET_NAME \\"
+            echo "     --name $SUBNET_NAME \\"
+            echo "     --delegations Microsoft.Web/serverFarms"
+            echo ""
+            echo "   See docs/V2-SKU-SUBNET-DELEGATION.md for more details."
+        fi
     else
         USE_EXISTING_SUBNET="false"
         CREATE_NEW_SUBNET_IN_EXISTING_VNET="true"
@@ -437,6 +437,19 @@ if [[ "$USE_EXISTING_NSG" == "true" || "$USE_EXISTING_VNET" == "true" ]]; then
 else
     info "Will create all new network resources (default behavior)"
 fi
+
+# VNet integration guidance based on selected SKU
+echo ""
+case "$SKU_NAME" in
+    "Developer"|"Basic"|"Standard")
+        warn "⚠️  VNet Integration Notice:"
+        echo "   Selected SKU ($SKU_NAME) does not support VNet integration."
+        echo "   If VNet integration is required, consider using BasicV2/StandardV2 or Premium SKU."
+        ;;
+    "BasicV2"|"StandardV2"|"Premium"|"PremiumV2")
+        success "✅ VNet Integration: Selected SKU ($SKU_NAME) supports VNet integration"
+        ;;
+esac
 
 header "🚪 Gateway Configuration"
 
