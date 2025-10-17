@@ -79,9 +79,11 @@ resource apiProducts 'Microsoft.ApiManagement/service/products/apis@2021-08-01' 
 
 // -------------------------------------------
 // Associate the API with one or more gateways
+// Note: V2 SKUs (BasicV2, StandardV2, PremiumV2) do not support gateway associations
+// APIs are automatically available on the built-in gateway for V2 SKUs
 // -------------------------------------------
 @batchSize(1)
-resource apiGateways 'Microsoft.ApiManagement/service/gateways/apis@2021-08-01' = [for gatewayName in gatewayNames: {
+resource apiGateways 'Microsoft.ApiManagement/service/gateways/apis@2021-08-01' = [for gatewayName in gatewayNames: if (length(gatewayNames) > 0) {
   name: '${apimName}/${gatewayName}/${apiId}'
   dependsOn: [
     api
