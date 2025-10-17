@@ -303,8 +303,18 @@ deploy_api() {
     local params="apimName=\"$apim_name\" apiId=\"$api_id\""
     for key in $(echo "$api" | jq -r 'keys[]'); do
         if [[ "$key" == "specPath" || "$key" == "apiId" ]]; then continue; fi
+
+        # Skip gatewayNames for V2 SKUs - override with empty array
+        if [[ "$key" == "gatewayNames" && "$IS_V2_SKU" == "true" ]]; then
+            if [[ "$DEBUG" == "true" ]]; then
+                debug "Overriding gatewayNames to empty array for V2 SKU"
+            fi
+            params="$params $key='[]'"
+            continue
+        fi
+
         local val=$(echo "$api" | jq -c --arg k "$key" '.[$k]')
-        
+
         if echo "$val" | jq -e 'type == "string"' > /dev/null; then
             val=$(echo "$val" | jq -r '.')
             val=$(substitute_env_vars "$val")
@@ -313,6 +323,14 @@ deploy_api() {
             params="$params $key='$val'"
         fi
     done
+
+    # If gatewayNames wasn't in the config and this is V2, explicitly set to empty array
+    if [[ "$IS_V2_SKU" == "true" ]] && ! echo "$api" | jq -e 'has("gatewayNames")' > /dev/null; then
+        if [[ "$DEBUG" == "true" ]]; then
+            debug "Adding empty gatewayNames array for V2 SKU (not specified in config)"
+        fi
+        params="$params gatewayNames='[]'"
+    fi
     
     # Generate temporary Bicep file
     local temp_bicep="./temp-sync-${api_id}-$$.bicep"
@@ -414,6 +432,13 @@ source "$ENV_CONFIG_FILE"
 
 RG="$RESOURCE_GROUP"
 APIM_NAME="$APIM_NAME"
+
+# Detect if this is a V2 SKU (V2 SKUs don't support gateway associations)
+IS_V2_SKU=false
+if [[ -n "${SKU_NAME:-}" && "$SKU_NAME" =~ V2$ ]]; then
+    IS_V2_SKU=true
+    log "Detected V2 SKU ($SKU_NAME) - gateway associations will be skipped"
+fi
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Validation
