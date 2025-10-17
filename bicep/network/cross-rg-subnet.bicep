@@ -19,6 +19,9 @@ param subnetCidr string
 @description('Resource ID of the Network Security Group to associate with the subnet')
 param nsgResourceId string
 
+@description('APIM SKU name (used to determine if subnet delegation is needed)')
+param apimSkuName string
+
 // -------------------------------------------
 // Parse VNet Resource ID Components
 // -------------------------------------------
@@ -38,6 +41,7 @@ module subnetDeployment 'subnet-deployment.bicep' = {
     subnetName: subnetName
     subnetCidr: subnetCidr
     nsgResourceId: nsgResourceId
+    apimSkuName: apimSkuName
   }
 }
 

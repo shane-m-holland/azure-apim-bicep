@@ -381,6 +381,14 @@ validate_network_reuse_config() {
             pass "Will reuse existing subnet in VNet"
             if [[ -n "${SUBNET_NAME:-}" ]]; then
                 pass "Existing subnet name provided: ${SUBNET_NAME}"
+
+                # Check for V2 SKU delegation requirement
+                if [[ "${SKU_NAME:-}" =~ V2$ ]]; then
+                    warn "V2 SKU detected: Existing subnet must be delegated to Microsoft.Web/serverFarms"
+                    echo "  To delegate the subnet, run:"
+                    echo "  az network vnet subnet update --resource-group <rg> --vnet-name <vnet> --name ${SUBNET_NAME} --delegations Microsoft.Web/serverFarms"
+                    echo "  See docs/V2-SKU-SUBNET-DELEGATION.md for details"
+                fi
             else
                 fail "USE_EXISTING_SUBNET=true but no subnet name provided"
             fi
@@ -464,11 +472,11 @@ validate_environment_config() {
     
     if [[ -n "${SKU_NAME:-}" ]]; then
         case "$SKU_NAME" in
-            "Developer"|"Basic"|"Standard"|"Premium")
+            "Developer"|"Basic"|"Standard"|"Premium"|"BasicV2"|"StandardV2"|"PremiumV2")
                 pass "SKU name is valid: $SKU_NAME"
                 ;;
             *)
-                fail "Invalid SKU name: $SKU_NAME (must be Developer, Basic, Standard, or Premium)"
+                fail "Invalid SKU name: $SKU_NAME (must be Developer, Basic, Standard, Premium, BasicV2, StandardV2, or PremiumV2)"
                 ;;
         esac
     fi

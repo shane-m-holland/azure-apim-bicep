@@ -18,6 +18,12 @@ param subnetCidr string
 @description('Resource ID of the Network Security Group to associate with the subnet')
 param nsgResourceId string
 
+@description('APIM SKU name (used to determine if subnet delegation is needed)')
+param apimSkuName string
+
+// Determine if this is a V2 SKU that requires subnet delegation
+var isV2Sku = contains(['BasicV2', 'StandardV2', 'PremiumV2'], apimSkuName)
+
 // -------------------------------------------
 // Reference existing VNet in current scope
 // -------------------------------------------
@@ -36,6 +42,15 @@ resource subnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' = {
     networkSecurityGroup: {
       id: nsgResourceId
     }
+    // V2 SKUs require subnet delegation to Microsoft.Web/serverFarms
+    delegations: isV2Sku ? [
+      {
+        name: 'apim-delegation'
+        properties: {
+          serviceName: 'Microsoft.Web/serverFarms'
+        }
+      }
+    ] : []
     // Disable policies for private endpoint access to allow direct connections
     privateEndpointNetworkPolicies: 'Disabled'
     // Enable policies for private link services (optional for APIM)

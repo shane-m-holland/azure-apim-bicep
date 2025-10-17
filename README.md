@@ -168,6 +168,24 @@ cd azure-apim-bicep
 chmod +x apim.sh scripts/*.sh
 ```
 
+### ⚠️ Important: V2 SKU Requirements
+
+If using **V2 SKUs** (BasicV2, StandardV2, PremiumV2), be aware of the following:
+
+**Automatic Subnet Delegation** - When creating new subnets, the templates automatically handle delegation to `Microsoft.Web/serverFarms` (required for V2 SKUs).
+
+**Manual Delegation Required** - If using an **existing subnet** with V2 SKUs, you must manually delegate the subnet before deployment:
+
+```bash
+az network vnet subnet update \
+  --resource-group <vnet-resource-group> \
+  --vnet-name <vnet-name> \
+  --name <subnet-name> \
+  --delegations Microsoft.Web/serverFarms
+```
+
+For detailed information, see [docs/V2-SKU-SUBNET-DELEGATION.md](docs/V2-SKU-SUBNET-DELEGATION.md)
+
 ### Using the Unified CLI (Recommended)
 
 The project now includes a unified CLI interface (`apim.sh`) that provides a single entry point for all operations:

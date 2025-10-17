@@ -133,6 +133,7 @@ module vnet 'network/vnet.bicep' = if (!useExistingVnet) {
     vnetCidr: vnetCidr
     subnetName: subnetName
     subnetCidr: subnetCidr
+    apimSkuName: skuName
   }
 }
 
@@ -146,6 +147,7 @@ module newSubnetInExistingVnet 'network/cross-rg-subnet.bicep' = if (useExisting
     subnetName: subnetName
     subnetCidr: subnetCidr
     nsgResourceId: useExistingNsg ? existingResources.outputs.nsgResourceId : nsg.outputs.id
+    apimSkuName: skuName
   }
 }
 
